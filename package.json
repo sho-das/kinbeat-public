@@ -1,0 +1,15 @@
+{
+  "name": "kinbeat-public",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm --prefix api install && npm --prefix web install",
+    "dev": "concurrently -k -n api,web -c blue,green \"npm --prefix api run start:dev\" \"npm --prefix web run dev\"",
+    "test": "npm --prefix api test",
+    "eval": "npm --prefix api run eval",
+    "checks": "npm --prefix api run checks"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
