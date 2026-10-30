@@ -9,17 +9,52 @@ import { Select } from "./Select";
 
 const L = content.left;
 
+type Group = "real" | "possible" | "example" | "other";
+function groupOf(f: ScanResult["findings"][number]): Group {
+  const kind = verdictKind(f);
+  return kind === "real" || kind === "possible" || kind === "example" ? kind : "other";
+}
+
 // Counts findings by what KinBeat said, in a fixed order, skipping empty groups.
 function tally(findings: ScanResult["findings"]): Array<[keyof typeof content.right.tallyNames, number]> {
   const groups: Record<string, number> = {};
   for (const f of findings) {
-    const kind = verdictKind(f);
-    const group = kind === "real" || kind === "possible" || kind === "example" ? kind : "other";
+    const group = groupOf(f);
     groups[group] = (groups[group] ?? 0) + 1;
   }
   return (["real", "possible", "example", "other"] as const).filter((k) => groups[k]).map((k) => [k, groups[k]] as [typeof k, number]);
 }
 const R = content.right;
+
+type ReadFile = NonNullable<ScanResult["files"]>[number];
+function fileLine(f: ReadFile) {
+  return `${f.file}: ${f.type}${f.pages ? `, ${f.pages} pages` : ""}${f.imagePages ? `, ${f.imagePages} read as pictures` : ""}${f.note ? `. ${f.note}` : ""}`;
+}
+
+// The list of files that were read, in a popup. Nothing is downloaded.
+function FileDialog({ files }: { files: ReadFile[] }) {
+  const box = useRef<HTMLDialogElement>(null);
+  return (
+    <>
+      <button type="button" className="linkbtn" onClick={() => box.current?.showModal()}>
+        {R.seeFiles}
+      </button>
+      <dialog ref={box} className="filebox" aria-label={R.filesTitle} onClick={(e) => e.target === box.current && box.current?.close()}>
+        <div className="filebox__head">
+          <b>{R.filesTitle}</b>
+          <button type="button" className="linkbtn" onClick={() => box.current?.close()}>
+            {R.close}
+          </button>
+        </div>
+        <ol className="filebox__list">
+          {files.map((f) => (
+            <li key={f.file}>{f.note ? `${f.file}. ${f.note}` : f.file}</li>
+          ))}
+        </ol>
+      </dialog>
+    </>
+  );
+}
 const NO_API = "The scanner is not reachable right now. Try again in a moment.";
 
 type Mode = "sample" | "paste" | "files" | "repo";
@@ -35,10 +70,12 @@ export function Scanner() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<ScanResult | null>(null);
+  const [group, setGroup] = useState<Group | null>(null);
   const [source, setSource] = useState("");
   const [dirty, setDirty] = useState(false);
   const countRef = useRef<HTMLHeadingElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const stop = useRef<AbortController | null>(null);
 
   useEffect(() => {
     fetch("/api/templates")
@@ -60,11 +97,11 @@ export function Scanner() {
   }, [mode, selected, text, file, repo]);
 
   const template = templates.find((t) => t.id === selected);
-  const ready = mode === "sample" ? !!template : mode === "paste" ? !!text.trim() : mode === "repo" ? !!repo.trim() && !repoProblem(repo) : !!file;
+  const ready = mode === "sample" ? !!template : mode === "paste" ? !!text.trim() : mode === "repo" ? !!repo.trim() : !!file;
 
   function changeMode(next: Mode) {
     setMode(next);
-    setError(next === "files" ? fileProblem(file) : next === "repo" ? repoProblem(repo) : "");
+    setError(next === "files" ? fileProblem(file) : "");
   }
 
   // One file at a time: the latest file replaces the one before, also when several are dropped together.
@@ -84,6 +121,7 @@ export function Scanner() {
     setError("");
     // The old result goes the moment a new scan starts, so a failed scan never shows the one before it.
     setResult(null);
+    setGroup(null);
     if (mode === "repo") {
       const problem = repoProblem(repo);
       if (problem) {
@@ -93,6 +131,9 @@ export function Scanner() {
     }
     // The card freezes at the first instant. Reading a large file to find out whether it was scanned before takes a moment.
     setBusy(true);
+    const controller = new AbortController();
+    stop.current = controller;
+    const { signal } = controller;
     try {
       // A repository result is saved on the server and checked against the latest commit, so the browser keeps no copy of it.
       const key = mode === "repo" ? "" : await inputKey(mode === "sample" && template ? { sample: template.id } : mode === "paste" ? { text } : { file });
@@ -113,6 +154,7 @@ export function Scanner() {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ templateId: template.id, useModel: true }),
+          signal,
         });
       } else if (mode === "paste") {
         label = "Pasted text";
@@ -120,6 +162,7 @@ export function Scanner() {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text, useModel: true }),
+          signal,
         });
       } else if (mode === "repo") {
         const link = repo.trim();
@@ -128,6 +171,7 @@ export function Scanner() {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ url: link, useModel: true }),
+          signal,
         });
       } else if (file) {
         const problem = fileProblem(file);
@@ -136,11 +180,14 @@ export function Scanner() {
         form.append("file", file);
         form.append("useModel", "true");
         label = file.name;
-        response = await fetch("/api/scan/file", { method: "POST", body: form });
+        response = await fetch("/api/scan/file", { method: "POST", body: form, signal });
       } else {
         throw new Error("Choose a file first.");
       }
-      const data = await response.json();
+      // A proxy or gateway can answer with a page that is not JSON. The visitor gets one plain sentence, not a parser message.
+      const data = await response.json().catch(() => {
+        throw new Error(L.badAnswer);
+      });
       if (!response.ok) throw new Error(data.message ? String(data.message) : `Scan failed (${response.status}).`);
       await sweep;
       setSource(label);
@@ -148,13 +195,17 @@ export function Scanner() {
       setDirty(false);
       if (store && cacheable(data as ScanResult)) save(store, key, data as ScanResult, Date.now());
     } catch (e) {
-      setError(e instanceof TypeError ? NO_API : (e as Error).message);
+      // Cancel is the visitor's choice, so it shows no error.
+      if ((e as Error).name !== "AbortError") setError(e instanceof TypeError ? NO_API : (e as Error).message);
     } finally {
+      stop.current = null;
       setBusy(false);
     }
   }
 
   const count = result?.findings.length ?? 0;
+  const groups = result ? tally(result.findings) : [];
+  const shown = groups.find(([kind]) => kind === group)?.[0] ?? groups[0]?.[0];
 
   return (
     <div className="consolewrap">
@@ -219,7 +270,7 @@ export function Scanner() {
                 aria-describedby="repohint"
                 onChange={(e) => {
                   setRepo(e.target.value);
-                  setError(repoProblem(e.target.value));
+                  setError("");
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && ready && !busy) run();
@@ -272,42 +323,64 @@ export function Scanner() {
         </div>
 
         <div className="ctrl bigscan">
-          <button className="btn" type="button" disabled={busy || !ready} onClick={() => run()}>
-            {busy ? L.scanning : result && !dirty ? L.scanAgain : L.scan}
-          </button>
+          {busy ? (
+            <button className="btn ghost" type="button" onClick={() => stop.current?.abort()}>
+              {L.cancel}
+            </button>
+          ) : (
+            <button className="btn" type="button" disabled={!ready} onClick={() => run()}>
+              {result && !dirty ? L.scanAgain : L.scan}
+            </button>
+          )}
         </div>
+        {result && !busy && result.repo && (
+          <ul className="notes scaninfo">
+            <li>
+              <b>{R.repoCommit}</b> {result.repo.sha.slice(0, 7)}
+            </li>
+            <li>
+              <b>{R.filesRead}:</b> {result.repo.files}. {result.files && result.files.length > 0 && <FileDialog files={result.files} />}
+            </li>
+            {Object.keys(result.repo.skipped).length > 0 && (
+              <li>
+                <b>{R.repoSkipped}:</b> {Object.entries(result.repo.skipped).map(([reason, n]) => `${n} ${reason}`).join(", ")}
+              </li>
+            )}
+          </ul>
+        )}
+        {result && !busy && result.summary.blocked > 0 && (
+          <p className="note scaninfo" role="status">
+            <b>Note:</b> {result.summary.blocked} {result.summary.blocked === 1 ? "finding was" : "findings were"} not judged: hidden for safety, because the value also appears in normal text.
+          </p>
+        )}
       </div>
 
       <div className="pane">
         <h3 className="ph">{R.title}</h3>
         <div aria-live="polite" aria-atomic="false">
           {error && <p className="err">{error}</p>}
-          {busy && (
-            <p className="note working" role="status">
-              {R.working}
-              <span className="dots" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-              </span>
-            </p>
-          )}
           {!result && !error && !busy && (
             <div className="empty preview">
               <p className="preview-title">{R.empty}</p>
               <div className="findghost" aria-hidden="true">
                 <b>{R.exampleType}</b>
                 <span className="masked">AK****************01</span>
-                <em>{R.exampleVerdict}</em>
               </div>
               <p className="preview-hint">{R.emptyHint}</p>
             </div>
           )}
           {busy && (
-            <div className="skeleton" aria-hidden="true">
-              <i />
-              <i />
-              <i />
+            <div className="skeleton">
+              <div className="skel">
+                <p className="note working" role="status">
+                  {R.working}
+                  <span className="dots" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                </p>
+              </div>
             </div>
           )}
           {result && !busy && (
@@ -321,35 +394,19 @@ export function Scanner() {
               </p>
               {count > 0 && (
                 <ul className="tally" aria-label={R.tallyLabel}>
-                  {tally(result.findings).map(([kind, n]) => (
-                    <li key={kind} className={`tally-${kind}`}>
-                      <b>{n}</b> {R.tallyNames[kind]}
+                  {groups.map(([kind, n]) => (
+                    <li key={kind}>
+                      <button type="button" className={`tally-${kind}`} aria-pressed={kind === shown} onClick={() => setGroup(kind)}>
+                        <b>{n}</b> {R.tallyNames[kind]}
+                      </button>
                     </li>
                   ))}
                 </ul>
               )}
-              {result.repo && (
-                <ul className="notes">
-                  <li>
-                    {R.repoCommit} {result.repo.sha.slice(0, 7)}, {R.repoScanned} {new Date(result.repo.scannedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}. {result.repo.files} files read. {result.repo.cached ? R.repoSaved : ""}
-                  </li>
-                  <li>{result.repo.note}</li>
-                  {Object.keys(result.repo.skipped).length > 0 && (
-                    <li>
-                      {R.repoSkipped} {Object.entries(result.repo.skipped).map(([reason, n]) => `${n} ${reason}`).join(", ")}.
-                    </li>
-                  )}
-                </ul>
-              )}
-              {result.files && result.files.length > 0 && (
+              {!result.repo && result.files && result.files.length > 0 && (
                 <ul className="notes">
                   {result.files.map((f) => (
-                    <li key={f.file}>
-                      {f.file}: {f.type}
-                      {f.pages ? `, ${f.pages} pages` : ""}
-                      {f.imagePages ? `, ${f.imagePages} read as pictures` : ""}
-                      {f.note ? `. ${f.note}` : ""}
-                    </li>
+                    <li key={f.file}>{fileLine(f)}</li>
                   ))}
                 </ul>
               )}
@@ -358,13 +415,8 @@ export function Scanner() {
                   {result.summary.unread} {result.summary.unread === 1 ? "picture or page" : "pictures or pages"} {R.unread}
                 </p>
               )}
-              {result.summary.blocked > 0 && (
-                <p className="note" role="status">
-                  {result.summary.blocked} {result.summary.blocked === 1 ? "finding was" : "findings were"} not judged: hidden for safety, because the value also appears in normal text.
-                </p>
-              )}
               <div className="findings">
-                {result.findings.map((f, i) => (
+                {result.findings.filter((f) => groupOf(f) === shown).map((f, i) => (
                   <FindingCard key={f.id} finding={f} index={i} scanId={result.scanId} scanLabel={source} />
                 ))}
               </div>

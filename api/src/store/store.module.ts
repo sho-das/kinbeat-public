@@ -1,9 +1,9 @@
 import { Global, Inject, Injectable, Logger, Module, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
-import { MemoryAuthStore, MemoryCaseStore, MemoryScanStore } from './memory.store';
+import { MemoryAuthStore, MemoryCaseStore, MemoryRepoStore, MemoryScanStore } from './memory.store';
 import { migrate } from './migrate';
-import { PgAuthStore, PgCaseStore, PgScanStore } from './pg.store';
-import { AUTH_STORE, AuthStore, CASE_STORE, CaseStore, SCAN_STORE, ScanStore } from './types';
+import { PgAuthStore, PgCaseStore, PgRepoStore, PgScanStore } from './pg.store';
+import { AUTH_STORE, AuthStore, CASE_STORE, CaseStore, REPO_STORE, RepoStore, SCAN_STORE, ScanStore } from './types';
 
 const POOL = Symbol('PG_POOL');
 const RETENTION_DAYS = 30;
@@ -26,6 +26,7 @@ class StoreLifecycle implements OnModuleInit, OnApplicationShutdown {
     @Inject(POOL) private readonly pool: Pool | null,
     @Inject(SCAN_STORE) private readonly scans: ScanStore,
     @Inject(AUTH_STORE) private readonly auth: AuthStore,
+    @Inject(REPO_STORE) private readonly repos: RepoStore,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -49,6 +50,8 @@ class StoreLifecycle implements OnModuleInit, OnApplicationShutdown {
     try {
       const removed = await this.scans.purge(RETENTION_DAYS);
       if (removed) this.logger.log(`removed ${removed} scans older than ${RETENTION_DAYS} days`);
+      const results = await this.repos.purge(RETENTION_DAYS);
+      if (results) this.logger.log(`removed ${results} repository results older than ${RETENTION_DAYS} days`);
       await this.auth.purgeExpired(Date.now());
     } catch (error) {
       this.logger.warn(`purge failed: ${(error as Error).name}`);
@@ -72,8 +75,9 @@ class StoreLifecycle implements OnModuleInit, OnApplicationShutdown {
     { provide: SCAN_STORE, inject: [POOL], useFactory: (pool: Pool | null): ScanStore => (pool ? new PgScanStore(pool) : new MemoryScanStore()) },
     { provide: CASE_STORE, inject: [POOL], useFactory: (pool: Pool | null): CaseStore => (pool ? new PgCaseStore(pool) : new MemoryCaseStore()) },
     { provide: AUTH_STORE, inject: [POOL], useFactory: (pool: Pool | null): AuthStore => (pool ? new PgAuthStore(pool) : new MemoryAuthStore()) },
+    { provide: REPO_STORE, inject: [POOL], useFactory: (pool: Pool | null): RepoStore => (pool ? new PgRepoStore(pool) : new MemoryRepoStore()) },
     StoreLifecycle,
   ],
-  exports: [SCAN_STORE, CASE_STORE, AUTH_STORE],
+  exports: [SCAN_STORE, CASE_STORE, AUTH_STORE, REPO_STORE],
 })
 export class StoreModule {}

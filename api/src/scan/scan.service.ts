@@ -1,3 +1,5 @@
+import { foundBecause } from './found-because';
+import { maskedLine } from './line';
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { clearRecentCandidates, findCandidates } from './candidates';
 import { ScanLog } from './scan.log';
@@ -114,6 +116,8 @@ export class ScanService {
           id: `f${findings.length + 1}`,
           type: candidate.type,
           encoding: candidate.encoding,
+          found: foundBecause(segment.text, candidate),
+          line: maskedLine(segment.text, candidates, candidate),
           source: segment.source,
           place: {
             file: segment.file,
@@ -213,6 +217,8 @@ export class ScanService {
         id: `f${index + 1}`,
         type: candidate.type,
         encoding: candidate.encoding,
+        found: foundBecause(text, candidate),
+        line: maskedLine(text, candidates, candidate),
         place: last > first ? { unit, index: first, endIndex: last } : { unit, index: first },
         preview: mask(candidate.value),
         hash: this.hasher.hash(candidate.value),

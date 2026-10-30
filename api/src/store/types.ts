@@ -96,8 +96,27 @@ export interface AuthStore {
 }
 
 export const AUTH_STORE = Symbol('AUTH_STORE');
+// One finished repository scan, kept for the exact commit it was made from. The value is the masked result, like a scan record.
+export interface RepoResultRow {
+  key: string;
+  slug: string;
+  sha: string;
+  commitAt: string | null;
+  commitUrl: string;
+  at: string;
+  value: unknown;
+}
+
+export interface RepoStore {
+  get(key: string): Promise<RepoResultRow | undefined>;
+  put(row: RepoResultRow): Promise<void>;
+  forget(slug: string): Promise<number>;
+  purge(olderThanDays: number): Promise<number>;
+}
+
 export const SCAN_STORE = Symbol('SCAN_STORE');
 export const CASE_STORE = Symbol('CASE_STORE');
+export const REPO_STORE = Symbol('REPO_STORE');
 
 // Admin emails are stored and looked up in this one form.
 export const normaliseEmail = (email: string): string => email.trim().toLowerCase();

@@ -5,6 +5,9 @@ export const SLICE_LIMIT = 400;
 export const SLICE_WIDTHS = [SLICE_LIMIT, 800];
 const MIN_FORBIDDEN_LENGTH = 4;
 
+// The one sentence a visitor sees when the safety check stops a finding from going to the AI.
+export const BLOCKED_REASON = 'Not sent to the AI, because we could not be sure the secret was fully hidden. Treat it as a real secret.';
+
 export type ScrubResult = { ok: true; slice: string } | { ok: false; error: string };
 
 function tokenFor(candidate: Candidate): string {
@@ -35,6 +38,7 @@ const FIELD_SEPARATOR = '\u0001';
 // The parts of a finding that the scrubber looks at. Any finding shape that has these fields fits.
 export interface FindingParts {
   preview?: unknown;
+  line?: unknown;
   place?: object | null;
   judge?: object | null;
 }
@@ -43,7 +47,8 @@ export interface FindingParts {
 function visibleText(finding: FindingParts | null | undefined): string {
   const place = finding?.place as { file?: unknown } | null | undefined;
   const judge = finding?.judge as { slice?: unknown; facts?: unknown } | null | undefined;
-  return [finding?.preview, place?.file, judge?.slice, judge?.facts].filter((v) => typeof v === 'string').join(FIELD_SEPARATOR);
+  const line = finding?.line as { before?: unknown; mark?: unknown; after?: unknown } | null | undefined;
+  return [finding?.preview, place?.file, judge?.slice, judge?.facts, line?.before, line?.mark, line?.after].filter((v) => typeof v === 'string').join(FIELD_SEPARATOR);
 }
 
 // Looks for a found secret, raw or JSON-escaped, in the visible fields of one finding.
@@ -62,6 +67,7 @@ export function withhold<T extends { place?: object | null }>(finding: T): T {
   return {
     ...finding,
     preview: 'Hidden for safety',
+    line: undefined,
     place,
     judge: { status: 'blocked', error: 'Hidden for safety: its value also appears in text we would return.' },
   } as unknown as T;
@@ -182,7 +188,7 @@ export function buildSlice(text: string, target: Candidate, all: Candidate[], wi
   const targetStart = owned?.start ?? -1;
   const targetEnd = owned?.end ?? -1;
 
-  if (targetStart < 0) return { ok: false, error: 'Blocked: finding has no masked position.' };
+  if (targetStart < 0) return { ok: false, error: BLOCKED_REASON };
 
   const center = Math.floor((targetStart + targetEnd) / 2);
   let from = Math.max(0, center - width / 2);
@@ -203,10 +209,10 @@ export function buildSlice(text: string, target: Candidate, all: Candidate[], wi
 
   const leak = findLeak(slice, forbidden);
   if (leak !== null) {
-    return { ok: false, error: 'Blocked: plaintext secret found in the slice. No call was made to the model.' };
+    return { ok: false, error: BLOCKED_REASON };
   }
   if (findPartialLeak(slice, all) !== null) {
-    return { ok: false, error: 'Blocked: part of a secret is still in the slice. No call was made to the model.' };
+    return { ok: false, error: BLOCKED_REASON };
   }
   return { ok: true, slice };
 }

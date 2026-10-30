@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { MuseClient } from '../muse.client';
 import { ScanService } from '../scan.service';
 import { maskName } from '../scrubber';
@@ -19,7 +19,7 @@ type Result = Record<string, unknown> & { repo?: Record<string, unknown> };
 
 @Injectable()
 export class RepoScanService {
-  private readonly running = new Map<string, Promise<Result>>();
+  private readonly logger = new Logger(RepoScanService.name);
 
   constructor(
     private readonly github: GithubClient,
@@ -31,23 +31,27 @@ export class RepoScanService {
   async scan(link: string, useModel: boolean, owner: string | undefined, signal: AbortSignal): Promise<Result> {
     const parsed = parseRepoLink(link);
     if (!parsed) throw new BadRequestException('Use a link like https://github.com/owner/repository.');
-    const slug = `${parsed.owner}/${parsed.repo}`.toLowerCase();
     const latest = await this.github.resolve(parsed.owner, parsed.repo, parsed.refPath, signal);
     if (!latest) {
-      this.cache.forget(slug);
+      await this.cache.forget(`${parsed.owner}/${parsed.repo}`.toLowerCase());
       throw new NotFoundException(NOT_FOUND);
     }
+    // A renamed repository is scanned, saved and shown under its current name.
+    const ownerName = latest.owner ?? parsed.owner;
+    const repoName = latest.repo ?? parsed.repo;
+    const slug = `${ownerName}/${repoName}`.toLowerCase();
     // The key holds everything that changes the answer. A result made by the mock judge can never be served as a live one.
     const mode = this.muse.mode === 'live' ? this.muse.model : 'mock-judge';
     const key = [slug, latest.sha, SCANNER_VERSION, mode, useModel ? 'model' : 'rules'].join('|');
-    const saved = this.cache.get(key) as Result | undefined;
-    if (saved) return { ...saved, repo: { ...saved.repo, cached: true } };
+    const saved = (await this.cache.get(key)) as Result | undefined;
+    // Clients are not told whether a result is saved. The server log keeps count.
+    if (saved) {
+      this.logger.log(`saved result served ${slug}@${latest.sha.slice(0, 7)}`);
+      return saved;
+    }
 
-    const running = this.running.get(key);
-    if (running) return running;
-    const work = this.build(parsed.owner, parsed.repo, slug, latest.sha, key, useModel, owner, signal).finally(() => this.running.delete(key));
-    this.running.set(key, work);
-    return work;
+    // No joining of a scan another visitor started: it would end when that visitor leaves. Each visitor runs their own.
+    return this.build(ownerName, repoName, slug, latest.sha, key, useModel, owner, signal);
   }
 
   private async build(ownerName: string, repoName: string, slug: string, sha: string, key: string, useModel: boolean, owner: string | undefined, signal: AbortSignal): Promise<Result> {
@@ -76,8 +80,9 @@ export class RepoScanService {
       return { name: path, buffer: entry.data, fromArchive: true, label };
     });
     const result = (await this.scans.scanFiles(files, useModel, owner, signal, { prepared: true, label: `GitHub: ${slug}` })) as Result;
-    const cleaned = { ...result, repo: { owner: ownerName, repo: repoName, sha, scannedAt: new Date().toISOString(), files: files.length, skipped: { ...skipped, ...read.skipped }, cached: false, note: REPO_NOTE } };
-    this.cache.set(key, slug, cleaned);
+    const cleaned = { ...result, repo: { owner: ownerName, repo: repoName, sha, files: files.length, skipped: { ...skipped, ...read.skipped }, note: REPO_NOTE } };
+    const commit = await this.github.commitInfo(ownerName, repoName, sha, signal);
+    await this.cache.set(key, slug, sha, cleaned, commit);
     return cleaned;
   }
 }

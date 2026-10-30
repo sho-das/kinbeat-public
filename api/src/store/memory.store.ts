@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AdminRecord, AuditEntry, AuditRow, AuthStore, CaseRecord, CaseStore, normaliseEmail, ScanRecord, ScanRow, ScanStore } from './types';
+import { AdminRecord, AuditEntry, AuditRow, AuthStore, CaseRecord, CaseStore, normaliseEmail, RepoResultRow, RepoStore, ScanRecord, ScanRow, ScanStore } from './types';
 
 const MAX_SCANS = 200;
 
@@ -147,6 +147,41 @@ export class MemoryAuthStore implements AuthStore {
     let removed = 0;
     for (const [hash, token] of this.tokens) if (token.expiresAt <= now) (this.tokens.delete(hash), removed++);
     for (const [hash, session] of this.sessions) if (session.expiresAt <= now) (this.sessions.delete(hash), removed++);
+    return removed;
+  }
+}
+
+export class MemoryRepoStore implements RepoStore {
+  private readonly rows = new Map<string, RepoResultRow>();
+
+  async get(key: string): Promise<RepoResultRow | undefined> {
+    return this.rows.get(key);
+  }
+
+  async put(row: RepoResultRow): Promise<void> {
+    if (!this.rows.has(row.key)) this.rows.set(row.key, row);
+  }
+
+  async forget(slug: string): Promise<number> {
+    let removed = 0;
+    for (const [key, row] of this.rows) {
+      if (row.slug === slug) {
+        this.rows.delete(key);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  async purge(olderThanDays: number): Promise<number> {
+    const limit = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+    let removed = 0;
+    for (const [key, row] of this.rows) {
+      if (Date.parse(row.at) < limit) {
+        this.rows.delete(key);
+        removed++;
+      }
+    }
     return removed;
   }
 }

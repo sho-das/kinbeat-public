@@ -33,6 +33,8 @@ export interface Finding {
   id: string;
   type: string;
   encoding: string;
+  found?: string;
+  line?: { before: string; mark: string; after: string };
   source?: string;
   place: Place;
   preview: string;
@@ -58,12 +60,12 @@ export interface ScanResult {
   model: string;
   confidenceNote?: string;
   files?: FileNote[];
-  repo?: { owner: string; repo: string; sha: string; scannedAt: string; files: number; skipped: Record<string, number>; cached: boolean; note: string };
+  repo?: { owner: string; repo: string; sha: string; files: number; skipped: Record<string, number>; note: string };
   summary: { findings: number; blocked: number; errors: number; unread?: number; unverified?: number; timeouts?: number; limited?: number };
   findings: Finding[];
 }
 
-export type VerdictKind = "real" | "possible" | "example" | "off" | "unavailable" | "validating" | "timeout" | "limit" | "blocked";
+export type VerdictKind = "real" | "possible" | "example" | "off" | "unavailable" | "timeout" | "limit" | "blocked";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -121,12 +123,13 @@ export function placeLabel(place: Place): string {
 export function verdictKind(finding: Finding): VerdictKind {
   const status = finding.judge.status;
   if (status === "skipped") return "off";
-  if (status === "unverified") return "validating";
+  if (status === "unverified") return "possible";
   if (status === "timeout") return "timeout";
   if (status === "limit") return "limit";
   if (status === "blocked") return "blocked";
   if (status !== "ok") return "unavailable";
-  if (finding.judge.verdict === "real") return "real";
+  // A rule that found only a word like "token", with no key shape, is not enough to call a finding real.
+  if (finding.judge.verdict === "real") return finding.confidence.level === "low" ? "possible" : "real";
   if (finding.judge.verdict === "example") return "example";
   return "possible";
 }

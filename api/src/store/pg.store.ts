@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
-import { AdminRecord, AuditEntry, AuditRow, AuthStore, CaseRecord, CaseStore, normaliseEmail, ScanRecord, ScanRow, ScanStore } from './types';
+import { AdminRecord, AuditEntry, AuditRow, AuthStore, CaseRecord, CaseStore, normaliseEmail, ScanRecord, ScanRow, RepoResultRow, RepoStore, ScanStore } from './types';
 
 const iso = (value: Date | string): string => (value instanceof Date ? value.toISOString() : value);
 
@@ -221,5 +221,32 @@ export class PgAuthStore implements AuthStore {
     const sessions = await this.pool.query('DELETE FROM sessions WHERE expires_at <= $1', [when]);
     await this.pool.query('DELETE FROM login_attempts WHERE at < $1', [new Date(now - 24 * 3_600_000)]);
     return (tokens.rowCount ?? 0) + (sessions.rowCount ?? 0);
+  }
+}
+
+export class PgRepoStore implements RepoStore {
+  constructor(private readonly pool: Pool) {}
+
+  async get(key: string): Promise<RepoResultRow | undefined> {
+    const { rows } = await this.pool.query('SELECT key, slug, sha, commit_at, commit_url, at, value FROM repo_results WHERE key = $1', [key]);
+    const row = rows[0];
+    return row ? { key: row.key, slug: row.slug, sha: row.sha, commitAt: row.commit_at ? new Date(row.commit_at).toISOString() : null, commitUrl: row.commit_url, at: new Date(row.at).toISOString(), value: row.value } : undefined;
+  }
+
+  async put(row: RepoResultRow): Promise<void> {
+    await this.pool.query(
+      'INSERT INTO repo_results (key, slug, sha, commit_at, commit_url, at, value) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (key) DO NOTHING',
+      [row.key, row.slug, row.sha, row.commitAt, row.commitUrl, row.at, JSON.stringify(row.value)],
+    );
+  }
+
+  async forget(slug: string): Promise<number> {
+    const result = await this.pool.query('DELETE FROM repo_results WHERE slug = $1', [slug]);
+    return result.rowCount ?? 0;
+  }
+
+  async purge(olderThanDays: number): Promise<number> {
+    const result = await this.pool.query("DELETE FROM repo_results WHERE at < now() - ($1 || ' days')::interval", [String(olderThanDays)]);
+    return result.rowCount ?? 0;
   }
 }

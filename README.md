@@ -4,10 +4,11 @@ KinBeat finds exposed secrets in chats, files and public GitHub repositories, su
 
 ## Meta model
 
-- Meta's Muse model (`muse-spark-1.3`) is the judge. It is the only model that makes decisions at runtime.
+- Meta's Muse Spark Open is the judge, served on a partner endpoint (Modal). It is the only model that makes decisions at runtime.
+- `MODEL_API_BASE_URL` and `MODEL_API_MODEL` in `api/.env` choose the endpoint and the model.
 - Rules find the candidates. Each secret is masked first, and the model sees only a small masked slice of text around it.
 - The same Muse model reads pictures and scanned PDF pages as text. A picture is sent whole, because nothing can be masked before it is read.
-- The model says whether a finding is real, possible or an example. The page shows this as "KinBeat says".
+- The model says whether a finding is real, possible or an example, and gives a one-sentence reason. The page groups findings this way.
 - Without `MODEL_API_KEY` the app runs a simple mock judge, and every result says `mode: mock`.
 
 ## Run
@@ -24,8 +25,7 @@ npm install && cp api/.env.example api/.env && npm run dev
 ## Try it
 
 - Pick a sample, paste a chat, upload one file (text, PDF, Word, image or zip), or paste the link of a public GitHub repository.
-- Each finding shows where it is, a masked preview, the verdict and the masked slice the model saw.
-- A secret found in a repository may belong to someone else. Do not use it.
+- Each finding shows where it was found, a confidence level and why the KinBeat AI judged it that way.
 
 ## Open-source software used
 

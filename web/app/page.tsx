@@ -1,6 +1,6 @@
 import { content as C } from "./content";
 import { Demo } from "./components/Demo";
-import { Wordmark } from "./components/Wordmark";
+import { Footer } from "./components/Footer";
 import { Nav } from "./components/Nav";
 import { Scanner } from "./components/Scanner";
 import { Settle } from "./components/Settle";
@@ -81,7 +81,6 @@ export default function Home() {
             <h2 className="big" id="scan-h">
               {C.scanSection.title}
             </h2>
-            <p className="note">{C.scanSection.note}</p>
             <Scanner />
           </div>
         </section>
@@ -104,17 +103,7 @@ export default function Home() {
 
       </main>
 
-      <footer className="foot dark">
-        <div className="wrap">
-          <div className="row">
-            <Wordmark />
-          </div>
-          <p className="contact" id="contact">
-            Questions or a bigger scan? <a href={`mailto:${C.contactEmail}`}>Contact us</a>
-          </p>
-          <p className="note">{C.draft}</p>
-        </div>
-      </footer>
+      <Footer />
     </>
   );
 }

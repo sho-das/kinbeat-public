@@ -12,7 +12,7 @@ interface Entry {
 
 type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-// A result is saved only when it is final. Errors, timeouts, limits and "still validating" would be frozen otherwise.
+// A result is saved only when it is final. Errors, timeouts, limits and unconfirmed answers would be frozen otherwise.
 export function cacheable(result: ScanResult): boolean {
   const s = result.summary;
   return !s.errors && !s.timeouts && !s.limited && !s.unverified;

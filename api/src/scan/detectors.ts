@@ -93,14 +93,14 @@ const RULES: Rule[] = [
   },
   {
     type: 'generic_secret',
-    pattern: new RegExp(`(?:password|passwd|passcode|pwd|secret|api[_ -]?key|token|recovery[_ -]?code)[A-Za-z0-9_-]{0,40}(?:\\s*[:=]\\s*|\\s+is\\s+(?=\\S*\\d))(?:"([^"\\n]{6,200})"|'([^'\\n]{6,200})'|(${WHOLE}))`, 'dgi'),
+    pattern: new RegExp(`(?:password|passwd|passcode|pwd|secret|api[_ -]?key|token|recovery[_ -]?code)[A-Za-z0-9_-]{0,40}(?:[ \\t]*[:=][ \\t]*|[ \\t]+is[ \\t]+(?=\\S*\\d))(?:"([^"\\n]{6,200})"|'([^'\\n]{6,200})'|(${WHOLE}))`, 'dgi'),
     groups: [1, 2, 3],
     score: genericScore,
     accept: real,
   },
   {
     type: 'generic_secret',
-    pattern: /(?:password|passwd|passcode|pwd)[A-Za-z0-9_-]{0,40}\s*[:=]\s*["']?([^\s"'<>(){}\[\],;&]{1,5})(?=\s|["']|$)/dgi,
+    pattern: /(?:password|passwd|passcode|pwd)[A-Za-z0-9_-]{0,40}[ \t]*[:=][ \t]*["']?([^\s"'<>(){}\[\],;&]{1,5})(?=\s|["']|$)/dgi,
     group: 1,
     score: (value) => (value.length < 4 ? 0.3 : 0.45),
     accept: (value) => real(value) && !FILLER.test(value),
@@ -135,7 +135,7 @@ const RULES: Rule[] = [
   },
   {
     type: 'generic_secret',
-    pattern: /(?<!\]\s)\p{L}[\p{L}\p{M}\p{N}_-]{1,30}\s*[:=\uff1a]\s*([^\s"'<>(){}\[\],;&]{10,128})/dgu,
+    pattern: /(?<!\]\s)\p{L}[\p{L}\p{M}\p{N}_-]{1,30}[ \t]*[:=\uff1a][ \t]*([^\s"'<>(){}\[\],;&]{10,128})/dgu,
     group: 1,
     score: () => 0.55,
     accept: (value) => real(value) && randomLooking(value),
