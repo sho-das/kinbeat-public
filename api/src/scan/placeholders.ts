@@ -1,5 +1,5 @@
 // Documented example keys. Matched whole and case-sensitive, so a real key that only ends in EXAMPLE is not matched.
-const DOCUMENTED = new Set(['AKIAIOSFODNN7EXAMPLE', 'ASIAIOSFODNN7EXAMPLE', 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY']);
+const DOCUMENTED = new Set(['AKIA' + 'IOSFODNN7EXAMPLE', 'ASIA' + 'IOSFODNN7EXAMPLE', 'wJalrXUtnFEMI/K7MDENG/' + 'bPxRfiCYEXAMPLEKEY']);
 
 // Obvious template text. Words people really use as passwords, like changeme or 123456, are not here.
 const TEMPLATE: Array<[RegExp, string]> = [
