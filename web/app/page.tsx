@@ -81,6 +81,9 @@ export default function Home() {
             <h2 className="big" id="scan-h">
               {C.scanSection.title}
             </h2>
+            <p className="strip">
+              <strong>{C.scanSection.strip}</strong> <span>{C.scanSection.stripNote}</span>
+            </p>
             <Scanner />
           </div>
         </section>
