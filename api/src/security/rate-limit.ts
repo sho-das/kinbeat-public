@@ -48,6 +48,25 @@ export class ScanRateLimitGuard implements CanActivate {
   }
 }
 
+// A scan that carries a token is limited much tighter, and every request that has a token field counts, valid or not.
+// Otherwise the page could be used to test stolen tokens.
+@Injectable()
+export class TokenScanRateLimitGuard implements CanActivate {
+  private readonly limiter = new RateLimiter(positiveEnv('TOKEN_SCAN_RATE_LIMIT', 5), positiveEnv('TOKEN_SCAN_RATE_WINDOW_SECONDS', 600) * 1000);
+
+  canActivate(context: ExecutionContext): boolean {
+    const http = context.switchToHttp();
+    const request = http.getRequest();
+    if (request.body?.token === undefined) return true;
+    const result = this.limiter.hit(visitorKey(request));
+    if (!result.allowed) {
+      http.getResponse().setHeader('Retry-After', String(result.retryAfterSeconds));
+      throw new HttpException(`Too many private scans. Try again in ${result.retryAfterSeconds} seconds.`, HttpStatus.TOO_MANY_REQUESTS);
+    }
+    return true;
+  }
+}
+
 // One file scan at a time for each visitor. It runs before the upload is read, so a second upload never reaches memory.
 // The slot is freed once the response has ended AND the scan work has stopped. A visitor who leaves mid-scan therefore
 // cannot start another scan while the first is still winding down. The controller records the work in res.locals.scanWork.

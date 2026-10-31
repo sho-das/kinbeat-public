@@ -6,6 +6,7 @@ import {
   confidenceLevel,
   confidenceText,
   encodingLabel,
+  githubLineUrl,
   placeLabel,
   typeLabel,
   verdictKind,
@@ -14,6 +15,17 @@ import {
 } from "../lib/scan";
 
 const R = content.right;
+
+// An inclined arrow that opens the line on GitHub, in a new tab. The line is highlighted there.
+function GithubLink({ url }: { url: string }) {
+  return (
+    <a className="ghlink" href={url} target="_blank" rel="noopener noreferrer" aria-label={R.openOnGithub} title={R.openOnGithub}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M7 17L17 7M8 7h9v9" />
+      </svg>
+    </a>
+  );
+}
 
 function VerdictTag({ kind }: { kind: keyof typeof R.verdict }) {
   return (
@@ -38,13 +50,14 @@ function Confidence({ finding }: { finding: Finding }) {
   );
 }
 
-export function FindingCard({ finding, index }: { finding: Finding; index: number; scanId?: string; scanLabel?: string }) {
+export function FindingCard({ finding, index, repo }: { finding: Finding; index: number; scanId?: string; scanLabel?: string; repo?: { owner: string; repo: string; sha: string } }) {
+  const githubUrl = githubLineUrl(repo, finding.place);
   const kind = verdictKind(finding);
   const asked = kind !== "off";
   const reason = asked ? finding.judge.reason ?? finding.judge.error ?? "" : R.reasonOff;
   const [open, setOpen] = useState(true);
   const [showLine, setShowLine] = useState(false);
-  const tag = kind === "timeout" || kind === "limit" || kind === "blocked";
+  const tag = kind === "timeout" || kind === "limit";
   return (
     <article className={`finding ${kind}`} style={{ animationDelay: `${index * 90}ms` }}>
       {(finding.type !== "generic_secret" || tag) && (
@@ -61,6 +74,7 @@ export function FindingCard({ finding, index }: { finding: Finding; index: numbe
       {!open && (
         <p className="finding__brief">
           <b>{R.file}:</b> {placeLabel(finding.place)}
+          {githubUrl && <GithubLink url={githubUrl} />}
         </p>
       )}
       {open && (
@@ -68,7 +82,10 @@ export function FindingCard({ finding, index }: { finding: Finding; index: numbe
       <dl className="facts">
         <div>
           <dt>{R.where}</dt>
-          <dd>{placeLabel(finding.place)}</dd>
+          <dd>
+            {placeLabel(finding.place)}
+            {githubUrl && <GithubLink url={githubUrl} />}
+          </dd>
         </div>
         <div>
           <dt>{R.confidence}</dt>

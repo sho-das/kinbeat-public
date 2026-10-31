@@ -125,7 +125,7 @@ footer.foot .contact a:hover,footer.foot .contact a:focus-visible{background:var
 .settled h1 .w,.settled .lede,.settled .cta,.settled .console{animation:none!important}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
 .samplebox{position:relative;overflow:hidden;border-radius:6px;background:var(--black)}
-textarea.sample{display:block;width:100%;min-height:180px;resize:vertical;border:0;margin:0;font-family:var(--font-mono);font-size:1rem;line-height:1.7;color:#E9E9E4;background:var(--black);padding:16px 18px}
+textarea.sample{display:block;width:100%;min-height:180px;max-height:420px;overflow-y:auto;scrollbar-color:#6b6b66 var(--black);resize:vertical;border:0;margin:0;font-family:var(--font-mono);font-size:1rem;line-height:1.7;color:#E9E9E4;background:var(--black);padding:16px 18px}
 .file-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 .picked{margin-top:12px;display:grid;gap:6px}
 .picked li{display:flex;justify-content:space-between;align-items:center;gap:12px;font-family:var(--font-mono);font-size:.95rem;color:var(--ink)}
@@ -339,3 +339,11 @@ footer.foot{background:var(--navy)}
 .finding .verdict{padding:0;background:none;min-height:0}
 .filebox__list li{padding:2px 0}
 .facts > div:first-child{padding-right:40px}
+.tokenbox{margin-top:16px}
+.field > .linkbtn{display:block;margin-top:12px;font-weight:600}
+.tokensteps{margin:10px 0 0;color:var(--ink);line-height:1.55}
+.tokensteps__title{font-weight:700;margin-bottom:6px}
+.tokensteps ol{padding-left:1.4em;list-style:decimal}
+.tokensteps li{margin-bottom:6px}
+.ghlink{display:inline-flex;align-items:center;vertical-align:middle;margin-left:8px;color:var(--ink);border:2px solid var(--black);border-radius:6px;padding:2px 4px}
+.ghlink:hover,.ghlink:focus-visible{background:var(--orange);color:var(--black)}

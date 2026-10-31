@@ -2,7 +2,7 @@ import { ArgumentsHost, BadRequestException, Body, Catch, ExceptionFilter, Contr
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Public } from '../auth/public';
 import { visitorKey } from '../security/client-ip';
-import { OneFileScanGuard, ScanRateLimitGuard } from '../security/rate-limit';
+import { OneFileScanGuard, ScanRateLimitGuard, TokenScanRateLimitGuard } from '../security/rate-limit';
 import { MAX_FILE_BYTES } from './extract/extractor.service';
 import { positiveEnv } from './limits';
 import { RepoScanService } from './repo/repo-scan.service';
@@ -23,8 +23,12 @@ class OneFileFilter implements ExceptionFilter {
   }
 }
 
+// A GitHub token: fine-grained (github_pat_) or classic (ghp_ and the other prefixes). Checked before any call to GitHub.
+const GITHUB_TOKEN = /^(github_pat_[A-Za-z0-9_]{20,240}|gh[pousr]_[A-Za-z0-9]{20,240})$/;
+
 interface ClientGone {
   writableEnded: boolean;
+  setHeader(name: string, value: string): unknown;
   locals?: Record<string, unknown>;
   on(event: 'close', listener: () => void): unknown;
 }
@@ -43,7 +47,7 @@ const quietIfCancelled = (error: unknown) => {
   throw error;
 };
 
-const MAX_TEXT = 200_000;
+const MAX_TEXT = 10_000;
 
 @Public()
 @Controller()
@@ -118,16 +122,23 @@ export class ScanController {
   }
 
   // A public GitHub repository, current files only. A scan is shared: while the latest commit is the same, every visitor gets the saved result.
+  // With a token the scan is private: nothing is shared, saved or logged, and the token is never echoed in an answer.
   @Post('scan/repo')
-  @UseGuards(ScanRateLimitGuard, OneFileScanGuard)
+  @UseGuards(ScanRateLimitGuard, TokenScanRateLimitGuard, OneFileScanGuard)
   @HttpCode(200)
-  scanRepo(@Body() body: { url?: unknown; useModel?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone) {
-    const { url, useModel } = body ?? {};
+  scanRepo(@Body() body: { url?: unknown; useModel?: unknown; token?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone) {
+    const { url, useModel, token } = body ?? {};
     if (typeof url !== 'string' || !url.trim() || url.length > 300) throw new BadRequestException('Use a link like https://github.com/owner/repository.');
     if (useModel !== undefined && typeof useModel !== 'boolean') throw new BadRequestException('useModel must be true or false');
+    let privateToken: string | undefined;
+    if (token !== undefined) {
+      if (typeof token !== 'string' || !GITHUB_TOKEN.test(token.trim())) throw new BadRequestException('That is not a GitHub token.');
+      privateToken = token.trim();
+      res.setHeader('Cache-Control', 'no-store');
+    }
     const gone = leaves(res);
     const deadline = AbortSignal.timeout(positiveEnv('SCAN_DEADLINE_SECONDS', 90) * 1000);
-    const work = this.repoScan.scan(url, useModel ?? true, visitorKey(req), AbortSignal.any([gone, deadline])).catch((error) => {
+    const work = this.repoScan.scan(url, useModel ?? true, visitorKey(req), AbortSignal.any([gone, deadline]), privateToken).catch((error) => {
       if (deadline.aborted && !gone.aborted) throw new RequestTimeoutException('This repository took too long to scan, so the scan was stopped.');
       if (gone.aborted) return undefined;
       throw error;

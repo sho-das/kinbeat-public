@@ -61,7 +61,7 @@ export class ScanService {
 
   // The recent-text memory in findCandidates only needs to live for one scan, so it is emptied when the scan ends.
   // With prepared set, the caller has already chosen and unpacked the files (a repository scan), so they are not checked again.
-  async scanFiles(files: UploadedFile[], useModel: boolean, owner?: string, signal?: AbortSignal, options: { prepared?: boolean; label?: string } = {}) {
+  async scanFiles(files: UploadedFile[], useModel: boolean, owner?: string, signal?: AbortSignal, options: { prepared?: boolean; label?: string; persist?: boolean } = {}) {
     try {
       return await this.runScanFiles(files, useModel, owner, signal, options);
     } finally {
@@ -77,7 +77,7 @@ export class ScanService {
     }
   }
 
-  private async runScanFiles(files: UploadedFile[], useModel: boolean, owner: string | undefined, signal: AbortSignal | undefined, options: { prepared?: boolean; label?: string }) {
+  private async runScanFiles(files: UploadedFile[], useModel: boolean, owner: string | undefined, signal: AbortSignal | undefined, options: { prepared?: boolean; label?: string; persist?: boolean }) {
     const startedAt = Date.now();
     if (!options.prepared) this.extractor.check(files);
     const expanded = options.prepared ? { files, reports: [] } : this.extractor.expand(files);
@@ -117,7 +117,7 @@ export class ScanService {
           type: candidate.type,
           encoding: candidate.encoding,
           found: foundBecause(segment.text, candidate),
-          line: maskedLine(segment.text, candidates, candidate),
+          line: maskedLine(segment.text, candidates, candidate, segmentForbidden),
           source: segment.source,
           place: {
             file: segment.file,
@@ -134,7 +134,7 @@ export class ScanService {
     }
 
     await this.judgeAll(jobs, findings, useModel, budget, owner, signal);
-    const safeFindings = findings.map((finding, index) => (findingLeak(finding, forbiddenOf[index]) ? withhold(finding) : finding));
+    const safeFindings = findings.map((finding, index) => (findingLeak(finding, forbiddenOf[index]) ? withhold(finding, forbiddenOf[index]) : finding));
     const unread = reports.reduce((n, report) => n + (report.notRead ? 1 : 0) + (report.notReadPages?.length ?? 0), 0);
     const forbiddenList = [...forbidden];
     const safeReports = reports.map((report) => (this.reportLeaks(report, forbiddenList) ? { file: '[file name hidden]', type: report.type } : report));
@@ -151,7 +151,8 @@ export class ScanService {
 
     this.assertClean(result.findings, forbiddenOf);
     this.logger.log(`file scan done files=${reports.length} findings=${findings.length} mode=${result.mode}`);
-    const scanId = await this.scanLog.record({ kind: 'files', label: options.label ?? files.map((f) => cleanName(f.name)).join(', '), files: files.length, startedAt }, result);
+    // persist false: nothing about this scan is written to the 30 day record (a private repository).
+    const scanId = options.persist === false ? undefined : await this.scanLog.record({ kind: 'files', label: options.label ?? files.map((f) => cleanName(f.name)).join(', '), files: files.length, startedAt }, result);
     return { ...result, scanId };
   }
 
@@ -205,6 +206,7 @@ export class ScanService {
     const { text, unit } = input;
     const candidates = findCandidates(text);
     const lineOf = this.lineFinder(text);
+    const forbidden = forbiddenStrings(text, candidates);
 
     const budget = new ScanBudget();
     const findings = [];
@@ -218,7 +220,7 @@ export class ScanService {
         type: candidate.type,
         encoding: candidate.encoding,
         found: foundBecause(text, candidate),
-        line: maskedLine(text, candidates, candidate),
+        line: maskedLine(text, candidates, candidate, forbidden),
         place: last > first ? { unit, index: first, endIndex: last } : { unit, index: first },
         preview: mask(candidate.value),
         hash: this.hasher.hash(candidate.value),
@@ -229,8 +231,7 @@ export class ScanService {
     }
     await this.judgeAll(jobs, findings, input.useModel, budget, input.owner, input.signal);
 
-    const forbidden = forbiddenStrings(text, candidates);
-    const safeFindings = findings.map((finding) => (findingLeak(finding, forbidden) ? withhold(finding) : finding));
+    const safeFindings = findings.map((finding) => (findingLeak(finding, forbidden) ? withhold(finding, forbidden) : finding));
     const result = {
       source: input.templateId ? { templateId: input.templateId, unit } : { unit },
       mode: this.muse.mode,

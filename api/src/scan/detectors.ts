@@ -6,7 +6,7 @@ interface Rule {
   group?: number;
   groups?: number[];
   score: (value: string) => number;
-  accept?: (value: string) => boolean;
+  accept?: (value: string, match: RegExpMatchArray) => boolean;
 }
 
 const fixed = (score: number) => () => score;
@@ -18,15 +18,39 @@ const genericScore = (value: string): number => {
 };
 
 const CODE_LIKE = [
-  /\(/,
+  // A call such as getPassword() or req.body.password(), and a value that starts with a bracket such as (e) =>. A value like P@ss(2024)xZ is kept.
+  /^[A-Za-z_$][\w$.?:<>,-]*\(/,
+  /^\(/,
+  // A regular expression written as a value, such as /^(?=.*[a-z]).{8,}$/. A value with only a leading slash, such as a base64 key, is kept.
+  /^\/.+\/[gimsuy]*;?$/,
   /^(?:process\.env|os\.environ|env\.|config\.|this\.|self\.|settings\.)/i,
-  /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$/,
-  /^[a-z]+(?:[A-Z][a-z]+)+$/,
+  /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)+[,;]?$/,
+  // A generic type such as Optional[str], and a name of lowercase words such as tls-secret: both point at something and hold no secret.
+  /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*\[/,
   /^(?:string|number|boolean|any|object|null|undefined|true|false|required|optional|none|empty)$/i,
-  /^[A-Za-z]+(?: [A-Za-z]+)+$/,
 ];
+// A name written as one word, such as new-password, newPassword, new_password, PasswordInput or SECRET_KEY, points at something.
+// After an = or : with no quotes it is a name used in code. In quotes it is a text value, which may be a real password, so it is kept.
+const NAME_SHAPES = [/^[a-z]+-[a-z]{1,12}$/, /^[a-z]+(?:[A-Z][a-z]+)+$/, /^[a-z]+(?:_[a-z]+)+$/, /^(?:[A-Z][a-z]+){2,}$/, /^[A-Z]+(?:_[A-Z]+)+$/];
 const PLACEHOLDER = [
-  /^[\[<${{]/,
+  // A YAML tag or an encrypted value, such as !vault, ENC[AES256_GCM,...] or $ANSIBLE_VAULT;1.1, holds no readable secret.
+  /^!{1,2}[a-z]+$/,
+  /^ENC\[/,
+  /^\$ANSIBLE_VAULT/,
+  // A template slot or an empty bracket, judged on the whole value. A value that only starts with $ or [ can be a real secret.
+  /^\$\{[A-Za-z_][\w.-]*\}$/,
+  /^\$[A-Z_][A-Z0-9_]*$/,
+  /^\{\{[^}]*\}\}$/,
+  // A note in brackets holds words only. With digits inside, such as [X9k2mQ7vLp], it may be a real value and is kept.
+  /^\{[A-Za-z][A-Za-z _.-]*\}$/,
+  /^<[A-Za-z][A-Za-z _.-]*>$/,
+  /^<\/?[A-Za-z][A-Za-z0-9-]*\/?>$/,
+  /^\[[A-Za-z][A-Za-z _.-]*\]$/,
+  // The first word of a bracketed note, such as [hidden by admin] or [REDACTED. A bracket followed by digits or symbols is kept.
+  /^[\[<{][A-Za-z][A-Za-z_-]*[\]>}]?$/,
+  /^%[A-Za-z_][\w.]*%$/,
+  /^@[A-Z_][A-Z0-9_]*@$/,
+  /^%(?:\d\$)?[sdif]$/,
   /^(?:your|my)[_-]/i,
   /[_-]here$/i,
   /^x{4,}$/i,
@@ -34,8 +58,39 @@ const PLACEHOLDER = [
   /^change[_-]me$/i,
   /^\*+$/,
   /^(?:password|passwd|pass|secret|token)$/i,
+  // Words that name something and hold no secret: an HTTP scheme (Bearer), the name of an environment variable (DB_PASSWORD),
+  // a pointer to a secret store (arn:aws:secretsmanager:..., vault://...), a lookup key (user:1234:profile) and the name of a stored secret (db-credentials).
+  /^(?:bearer|basic|digest|oauth|negotiate)$/i,
+  /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:PASSWORD|PASSWD|PWD|TOKEN|KEY|SECRET|CREDENTIALS?)$/,
+  /^(?:arn:aws[\w-]*:|vault:\/\/|ssm:|secret:\/\/|op:\/\/|akv:\/\/|projects\/[^/]+\/secrets\/)/i,
+  /^[a-z][a-z0-9_-]*:\d+:[a-z][a-z0-9_:-]*$/,
+  /^[a-z][a-z_-]*(?::[a-z][a-z_-]*){2,}$/,
+  /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*-(?:secrets?|credentials?|tokens?)$/,
 ];
-export const real = (value: string) => /[A-Za-z0-9]/.test(value) && ![...CODE_LIKE, ...PLACEHOLDER].some((pattern) => pattern.test(value));
+// A type name or a keyword of a programming language, such as the string in password: string or the async in handle = async () =>.
+// Trailing punctuation is ignored, so string) and string): count too. It is the same in any language and any project.
+const CODE_WORD =
+  /^(?:string|number|boolean|bool|any|unknown|void|never|object|bigint|symbol|int|float|double|str|bytes|list|dict|array|map|set|char|long|short|null|nil|none|undefined|true|false|async|await|function|func|def|fn|lambda|class|const|let|var|new|return|this|self|type|typeof|interface|enum|readonly|optional|required|import|export|void|secretstr|secretbytes|chararray|bytearray|stringbuilder|after|before|hover|focus|visited|checked|disabled)$/i;
+// Plain function words. In a sentence such as how do I reset my password: is there a link, the word after the colon is not a value.
+// Only the short password rule uses this, and only after a colon: pwd=at is still a short password.
+const PLAIN_WORD = /^(?:is|it|its|the|a|an|to|of|for|and|or|you|your|my|me|we|are|was|be|if|in|on|at|as|how|what|why|when|where|which|that|this|there|here|do|can|will|should|must|has|have|had|not)$/i;
+// Several words in a row that start with a capital, such as Mot de passe or Password must be 8 characters, are a sentence.
+// All-lowercase words, such as correct horse battery staple, may be a passphrase and are kept.
+const looksLikeSentence = (value: string) => {
+  const words = value.split(' ');
+  if (words.length < 2 || !words.every((word) => /^[\p{L}\p{N}'",.:;!?()+%-]+$/u.test(word))) return false;
+  return /^\p{Lu}\p{Ll}/u.test(value);
+};
+// Validation rules written as a string, such as Laravel's required|min:8 or required|same:password. Every part must be a known rule name.
+const RULE_NAMES = new Set(['required', 'nullable', 'sometimes', 'string', 'numeric', 'integer', 'boolean', 'email', 'min', 'max', 'size', 'between', 'same', 'different', 'confirmed', 'unique', 'exists', 'regex', 'alpha', 'alpha_num', 'alpha_dash', 'in', 'not_in', 'url', 'date', 'array', 'accepted', 'present', 'filled']);
+const looksLikeRules = (value: string) => /^[a-z_]+(?::[\w,.-]+)?(?:\|[a-z_]+(?::[\w,.-]+)?)*$/.test(value) && value.split('|').every((part) => RULE_NAMES.has(part.split(':')[0]));
+const hasCodeWord = (value: string) => {
+  const core = value.replace(/[)\]};:,>=?]+$/, '');
+  return CODE_WORD.test(core) || looksLikeSentence(value) || looksLikeRules(value);
+};
+export const real = (value: string, quoted = false) =>
+  /[A-Za-z0-9]/.test(value) && ![...CODE_LIKE, ...PLACEHOLDER, ...(quoted ? [] : NAME_SHAPES)].some((pattern) => pattern.test(value)) && !hasCodeWord(value);
+const isQuoted = (match: RegExpMatchArray) => match[1] !== undefined || match[2] !== undefined;
 const entropy = (value: string): number => {
   const counts = new Map<string, number>();
   for (const char of value) counts.set(char, (counts.get(char) ?? 0) + 1);
@@ -83,67 +138,188 @@ const RULES: Rule[] = [
   { type: 'github_token', pattern: /\bhf_[A-Za-z0-9]{34}\b/d, score: fixed(0.9) },
   {
     type: 'private_key',
-    pattern: /-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----[\s\S]{0,12000}?-----END (?:[A-Z]+ )*PRIVATE KEY-----/d,
+    pattern: /-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----(?:(?!-----BEGIN)[\s\S]){0,12000}?-----END (?:[A-Z]+ )*PRIVATE KEY-----/d,
     score: fixed(0.97),
   },
   {
     type: 'jwt',
-    pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/d,
+    // A match may start only at the start of a run, and each part has an upper bound. Without both, text such as eyJ-eyJ-eyJ-... took minutes.
+    pattern: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,20000}\.eyJ[A-Za-z0-9_-]{8,20000}\.[A-Za-z0-9_-]{8,20000}/d,
     score: fixed(0.85),
   },
   {
     type: 'generic_secret',
-    pattern: new RegExp(`(?:password|passwd|passcode|pwd|secret|api[_ -]?key|token|recovery[_ -]?code)[A-Za-z0-9_-]{0,40}(?:[ \\t]*[:=][ \\t]*|[ \\t]+is[ \\t]+(?=\\S*\\d))(?:"([^"\\n]{6,200})"|'([^'\\n]{6,200})'|(${WHOLE}))`, 'dgi'),
+    pattern: new RegExp(`(?:password|passwd|passcode|pwd|secret|api[_ -]?key|token|recovery[_ -]?code)[A-Za-z0-9_-]{0,40}(?:[ \\t]*(?::=|[:=])[ \\t]*|[ \\t]+is[ \\t]+(?=\\S*\\d))(?:"([^"\\n]{6,200})"|'([^'\\n]{6,200})'|(${WHOLE}))`, 'dgi'),
     groups: [1, 2, 3],
     score: genericScore,
-    accept: real,
+    accept: (value, match) => real(value, isQuoted(match)),
   },
   {
     type: 'generic_secret',
-    pattern: /(?:password|passwd|passcode|pwd)[A-Za-z0-9_-]{0,40}[ \t]*[:=][ \t]*["']?([^\s"'<>(){}\[\],;&]{1,5})(?=\s|["']|$)/dgi,
+    pattern: /(?:password|passwd|passcode|pwd)[A-Za-z0-9_-]{0,40}[ \t]*(?::=|[:=])[ \t]*["']?([^\s"'<>(){}\[\],;&]{1,5})(?=\s|["']|$)/dgi,
     group: 1,
     score: (value) => (value.length < 4 ? 0.3 : 0.45),
-    accept: (value) => real(value) && !FILLER.test(value),
+    accept: (value, match) => real(value) && !FILLER.test(value) && !(match[0].includes(':') && PLAIN_WORD.test(value)),
   },
   {
     type: 'generic_secret',
-    pattern: /"(?:password|passwd|pwd|secret|api_?key|access_?token|client_?secret|token)"\s*:\s*"([^"\n]{6,200})"/dgi,
+    pattern: /"(?:[A-Za-z0-9]{1,20}[_-])*(?:password|passwd|pwd|secret|api_?key|access_?token|client_?secret|token)"\s*:\s*"([^"\n]{6,200})"/dgi,
     group: 1,
     score: genericScore,
-    accept: real,
+    accept: (value) => real(value, true),
   },
   {
     type: 'generic_secret',
-    pattern: /\b[a-z][a-z0-9+.-]{1,15}:\/\/[^\s\/:@"']{1,100}:([^\s\/@"']{4,200})@/dgi,
+    pattern: /\b[a-z][a-z0-9+.-]{1,15}:\/\/[^\s\/:@"']{0,100}:([^\s\/@"']{4,200})@/dgi,
     group: 1,
     score: () => 0.8,
-    accept: real,
+    accept: (value) => real(value),
   },
   {
     type: 'generic_secret',
     pattern: /\bBearer\s+([A-Za-z0-9._~+\/=-]{20,500})/dg,
     group: 1,
     score: () => 0.8,
-    accept: real,
+    accept: (value) => real(value),
   },
   {
     type: 'generic_secret',
     pattern: /\bcurl\b[^\n]{0,200}?\s-u\s+["']?[^\s:"']{1,100}:([^\s"']{4,200})/dg,
     group: 1,
     score: () => 0.8,
-    accept: real,
+    accept: (value) => real(value),
   },
   {
     type: 'generic_secret',
-    pattern: /(?<!\]\s)\p{L}[\p{L}\p{M}\p{N}_-]{1,30}[ \t]*[:=\uff1a][ \t]*([^\s"'<>(){}\[\],;&]{10,128})/dgu,
+    // A label right after a quote or a colon is a piece of a text such as "user:1234:profile" or an arn, not a label.
+    pattern: /(?<!\]\s)(?<![\p{L}\p{M}\p{N}_"':-])\p{L}[\p{L}\p{M}\p{N}_-]{1,30}[ \t]*[:=\uff1a][ \t]*([^\s"'<>(){}\[\],;&]{10,128})/dgu,
     group: 1,
     score: () => 0.55,
-    accept: (value) => real(value) && randomLooking(value),
+    accept: (value) => real(value) && randomLooking(value) && !looksLikeCode(value),
+  },
+  // Fixed shapes: the form of the value alone says it is a credential.
+  { type: 'api_key', pattern: /\bSK[0-9a-f]{32}\b/d, score: fixed(0.9) },
+  { type: 'api_key', pattern: /https:\/\/(?:discord|discordapp)\.com\/api\/webhooks\/\d{17,20}\/[A-Za-z0-9_-]{60,80}/d, score: fixed(0.93) },
+  { type: 'api_key', pattern: /\bya29\.[A-Za-z0-9_-]{30,}/d, score: fixed(0.9) },
+  {
+    // A name with a secret word in it and a quoted value that looks random, such as db_pass = "..." or authKey: '...'.
+    type: 'generic_secret',
+    pattern: /(?<![A-Za-z])(?:pass|auth|credentials?|secret|token|api[_-]?key|private[_-]?key|pwd)(?![a-z])[A-Za-z0-9_.-]{0,30}["']?[ \t]*[:=\uff1a][ \t]*(?:"([^"\n]{10,200})"|'([^'\n]{10,200})')/dgi,
+    groups: [1, 2],
+    score: () => 0.55,
+    accept: (value) => !value.startsWith('-----BEGIN') && real(value, true) && randomLooking(value) && !looksLikeCode(value),
+  },
+  {
+    // A literal that stands after an environment lookup of a secret, such as process.env.JWT_SECRET || "...". The lookup itself is not flagged.
+    type: 'generic_secret',
+    pattern: /process\.env\.\w*(?:secret|token|pass|pwd|cred|auth|api_?key|private_?key|signing_?key|access_?key)\w*[ \t]*(?:\|\||\?\?)[ \t]*(?:"([^"\n]{10,200})"|'([^'\n]{10,200})')/dgi,
+    groups: [1, 2],
+    score: () => 0.6,
+    accept: (value) => real(value, true) && randomLooking(value) && !looksLikeCode(value),
+  },
+  {
+    type: 'generic_secret',
+    pattern: /(?:os\.getenv|os\.environ\.get|getenv|ENV\.fetch)\([ \t]*["'][^"'\n]*(?:secret|token|pass|pwd|cred|auth|api_?key|private_?key|signing_?key|access_?key)[^"'\n]*["'][ \t]*,[ \t]*(?:"([^"\n]{10,200})"|'([^'\n]{10,200})')/dgi,
+    groups: [1, 2],
+    score: () => 0.6,
+    accept: (value) => real(value, true) && randomLooking(value) && !looksLikeCode(value),
+  },
+  {
+    // A Terraform variable that is named like a secret and has a literal default.
+    type: 'generic_secret',
+    pattern: /\bvariable[ \t]+"[^"\n]*(?:pass|secret|token|api_?key|private_?key|cred)[^"\n]*"[ \t]*\{[^}]{0,300}?\bdefault[ \t]*=[ \t]*"([^"\n]{6,200})"/dgi,
+    group: 1,
+    score: genericScore,
+    accept: (value) => real(value, true),
   },
 ];
 
+// A CSS class such as border-gray-300, ring-offset-2 or bg-primary/50, and a property chain such as member?.display_name1,
+// are code and not a secret. A word-and-number class has only lowercase words and short numbers, which a random token never does.
+const CSS_CLASS = /^[a-z]+(?:-(?:[a-z]{1,12}|\d{1,3}))+(?:\/\d{1,3})?$/;
+const PROPERTY_CHAIN = /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)+$/;
+const PLAIN_NAME = /^[A-Za-z_$]+\d{0,2}$/;
+function looksLikeCode(value: string): boolean {
+  if (CSS_CLASS.test(value)) return true;
+  if (!PROPERTY_CHAIN.test(value)) return false;
+  // A chain with ?. is code. A plain chain is code only when every part is a short readable name, so a token such as a.b.c is kept.
+  return value.includes('?.') || value.split('.').every((part) => part.length <= 20 && PLAIN_NAME.test(part));
+}
+
 // Built once. matchAll works on a copy, so these are safe to share between calls.
 const COMPILED = RULES.map((rule) => ({ rule, pattern: new RegExp(rule.pattern.source, rule.pattern.flags.includes('g') ? rule.pattern.flags : rule.pattern.flags + 'g') }));
+
+// A table has its names on the first line and the values below, so a per-line rule never joins them.
+// This reads a header line with a secret-like column name, then takes that column from the rows under it.
+const CSV_DELIMITERS = [',', '\t', ';', '|'];
+const CSV_HEADER = /^[A-Za-z][A-Za-z0-9 _.-]{0,40}$/;
+const CSV_SECRET_HEADER = /^(?:[\w.-]*[ _.-])?(?:password|passwd|pwd|passcode|secret|token|api[ _.-]?key|private[ _.-]?key|credential)s?$/i;
+const CSV_NOT_A_SECRET = /^(?:true|false|yes|no|y|n|null|none|n\/a|\d+|\d{4}-\d{2}-\d{2}.*)$/i;
+const CSV_MAX_ROWS = 5000;
+interface Cell {
+  text: string;
+  start: number;
+  end: number;
+}
+// Splits one line at a delimiter outside quotes. start and end are positions in the whole text and leave out quotes and spaces.
+function splitCells(line: string, offset: number, delimiter: string): Cell[] {
+  const cells: Cell[] = [];
+  let from = 0;
+  let quoted = false;
+  for (let index = 0; index <= line.length; index++) {
+    const char = line[index];
+    if (char === '"') quoted = !quoted;
+    if (index < line.length && (quoted || char !== delimiter)) continue;
+    let start = from;
+    let end = index;
+    while (start < end && /[ \t"]/.test(line[start])) start++;
+    while (end > start && /[ \t"\r]/.test(line[end - 1])) end--;
+    cells.push({ text: line.slice(start, end), start: offset + start, end: offset + end });
+    from = index + 1;
+  }
+  return cells;
+}
+function tableSecrets(text: string): RawMatch[] {
+  const found: RawMatch[] = [];
+  const lines: Array<{ text: string; offset: number }> = [];
+  for (let offset = 0; offset <= text.length; ) {
+    const end = text.indexOf('\n', offset);
+    const stop = end < 0 ? text.length : end;
+    lines.push({ text: text.slice(offset, stop), offset });
+    offset = stop + 1;
+  }
+  for (let row = 0; row < lines.length - 1; row++) {
+    const header = lines[row];
+    if (header.text.length > 400) continue;
+    for (const delimiter of CSV_DELIMITERS) {
+      if (!header.text.includes(delimiter)) continue;
+      const names = splitCells(header.text, header.offset, delimiter).filter((cell, index, all) => cell.text !== '' || (index > 0 && index < all.length - 1));
+      if (names.length < 2 || !names.every((cell) => CSV_HEADER.test(cell.text))) continue;
+      const columns = names.map((cell, index) => (CSV_SECRET_HEADER.test(cell.text) ? index : -1)).filter((index) => index >= 0);
+      if (!columns.length) continue;
+      // A line that starts or ends with the delimiter, such as a markdown table, has an empty first or last cell.
+      const edge = header.text.trim().startsWith(delimiter) ? 1 : 0;
+      let next = row + 1;
+      for (; next < lines.length && next - row <= CSV_MAX_ROWS; next++) {
+        const line = lines[next];
+        if (line.text.trim() === '') break;
+        if (/^[\s|+:-]+$/.test(line.text)) continue;
+        const all = splitCells(line.text, line.offset, delimiter);
+        const cells = edge ? all.slice(1, all.length - (line.text.trim().endsWith(delimiter) ? 1 : 0)) : all;
+        if (cells.length !== names.length) break;
+        for (const column of columns) {
+          const cell = cells[column];
+          if (!cell || cell.text.length < 4 || CSV_NOT_A_SECRET.test(cell.text) || !real(cell.text, true)) continue;
+          found.push({ type: 'generic_secret', value: cell.text, start: cell.start, end: cell.end, score: genericScore(cell.text) });
+        }
+      }
+      // The rows read here are not read again as a header, so a long text stays one pass.
+      row = Math.max(row, next - 1);
+      break;
+    }
+  }
+  return found;
+}
 
 export function detect(text: string): RawMatch[] {
   const found: RawMatch[] = [];
@@ -154,7 +330,7 @@ export function detect(text: string): RawMatch[] {
       const value = match[group];
       const indices = match.indices?.[group];
       if (!value || !indices) continue;
-      if (rule.accept && !rule.accept(value)) continue;
+      if (rule.accept && !rule.accept(value, match)) continue;
       const key = `${indices[0]}:${value}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -166,6 +342,12 @@ export function detect(text: string): RawMatch[] {
         score: rule.score(value),
       });
     }
+  }
+  for (const match of tableSecrets(text)) {
+    const key = `${match.start}:${match.value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(match);
   }
   return found;
 }

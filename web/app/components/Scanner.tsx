@@ -66,6 +66,10 @@ export function Scanner() {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [repo, setRepo] = useState("");
+  // A private repository's token lives only in this state, for one scan. It is cleared when the scan ends or the tab changes.
+  const [token, setToken] = useState("");
+  const [tokenOpen, setTokenOpen] = useState(false);
+  const [tokenSteps, setTokenSteps] = useState(false);
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -101,6 +105,7 @@ export function Scanner() {
 
   function changeMode(next: Mode) {
     setMode(next);
+    setToken("");
     setError(next === "files" ? fileProblem(file) : "");
   }
 
@@ -170,7 +175,7 @@ export function Scanner() {
         response = await fetch("/api/scan/repo", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ url: link, useModel: true }),
+          body: JSON.stringify({ url: link, useModel: true, ...(token.trim() ? { token: token.trim() } : {}) }),
           signal,
         });
       } else if (file) {
@@ -199,6 +204,7 @@ export function Scanner() {
       if ((e as Error).name !== "AbortError") setError(e instanceof TypeError ? NO_API : (e as Error).message);
     } finally {
       stop.current = null;
+      setToken("");
       setBusy(false);
     }
   }
@@ -247,8 +253,9 @@ export function Scanner() {
                 {L.pasteLabel}
               </label>
               <div className={`samplebox${busy ? " scanning" : ""}`}>
-                <textarea id="pastetext" className="sample" value={text} placeholder={L.pastePlaceholder} spellCheck={false} readOnly={busy} onChange={(e) => setText(e.target.value)} />
+                <textarea id="pastetext" className="sample" value={text} placeholder={L.pastePlaceholder} spellCheck={false} maxLength={L.pasteLimit} readOnly={busy} onChange={(e) => setText(e.target.value)} />
               </div>
+              {text.length >= L.pasteLimit && <p className="err">{L.pasteTooLong}</p>}
             </div>
           )}
 
@@ -279,6 +286,56 @@ export function Scanner() {
               <p className="dz-hint repohint" id="repohint">
                 {L.repoHint}
               </p>
+              {!tokenOpen && !token && (
+                <button type="button" className="linkbtn" aria-expanded={false} aria-controls="repotoken-box" disabled={busy} onClick={() => setTokenOpen(true)}>
+                  {L.tokenToggle}
+                </button>
+              )}
+              {(tokenOpen || token) && (
+                <div id="repotoken-box" className="tokenbox">
+                  <label className="lbl" htmlFor="repotoken">
+                    {L.tokenLabel}
+                  </label>
+                  <input
+                    id="repotoken"
+                    className="repoinput"
+                    type="password"
+                    autoComplete="new-password"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    value={token}
+                    readOnly={busy}
+                    aria-describedby="repotoken-hint"
+                    onChange={(e) => {
+                      setToken(e.target.value);
+                      setError("");
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && ready && !busy) run();
+                    }}
+                  />
+                  <p className="dz-hint repohint" id="repotoken-hint">
+                    {L.tokenHintStart}{" "}
+                    <a href={L.tokenHelpUrl} target="_blank" rel="noopener noreferrer">
+                      {L.tokenLink}
+                    </a>{" "}
+                    {L.tokenHintEnd}{" "}
+                    <button type="button" className="linkbtn" aria-expanded={tokenSteps} aria-controls="token-steps" onClick={() => setTokenSteps(!tokenSteps)}>
+                      {tokenSteps ? L.tokenLess : L.tokenMore}
+                    </button>
+                  </p>
+                  {tokenSteps && (
+                    <div id="token-steps" className="tokensteps">
+                      <p className="tokensteps__title">{L.tokenStepsTitle}</p>
+                      <ol>
+                        {L.tokenSteps.map((step) => (
+                          <li key={step}>{step}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -350,7 +407,7 @@ export function Scanner() {
         )}
         {result && !busy && result.summary.blocked > 0 && (
           <p className="note scaninfo" role="status">
-            <b>Note:</b> {result.summary.blocked} {result.summary.blocked === 1 ? "finding was" : "findings were"} not judged: hidden for safety, because the value also appears in normal text.
+            <b>Note:</b> {result.summary.blocked} {result.summary.blocked === 1 ? "finding was" : "findings were"} hidden for safety and counted as real, because the value also appears in normal text.
           </p>
         )}
       </div>
@@ -417,7 +474,7 @@ export function Scanner() {
               )}
               <div className="findings">
                 {result.findings.filter((f) => groupOf(f) === shown).map((f, i) => (
-                  <FindingCard key={f.id} finding={f} index={i} scanId={result.scanId} scanLabel={source} />
+                  <FindingCard key={f.id} finding={f} index={i} scanId={result.scanId} scanLabel={source} repo={result.repo} />
                 ))}
               </div>
             </>

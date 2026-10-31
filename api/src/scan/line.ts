@@ -10,7 +10,7 @@ const SIDE = 70;
 const MAX_MARK = 40;
 
 // The line a finding sits on, with every found value replaced by stars. The value of this finding is kept apart so the page can highlight it.
-export function maskedLine(text: string, candidates: Candidate[], candidate: Candidate): MaskedLine {
+export function maskedLine(text: string, candidates: Candidate[], candidate: Candidate, forbidden: string[] = []): MaskedLine {
   const own = candidate.spans[0];
   const from = text.lastIndexOf('\n', own.start - 1) + 1;
   const stop = text.indexOf('\n', own.end);
@@ -30,7 +30,10 @@ export function maskedLine(text: string, candidates: Candidate[], candidate: Can
     }
     return out + text.slice(at, end);
   };
-  const clean = (value: string) => value.replace(/[\u0000-\u0008\u000b-\u001f]/g, ' ');
+  // The same value can also stand elsewhere on the line as plain text. Every copy is hidden, so the line is safe to show.
+  const longestFirst = [...forbidden].sort((a, b) => b.length - a.length);
+  const hideCopies = (value: string) => longestFirst.reduce((out, item) => out.split(item).join('*'.repeat(item.length)), value);
+  const clean = (value: string) => hideCopies(value.replace(/[\u0000-\u0008\u000b-\u001f]/g, ' '));
   const left = Math.max(from, own.start - SIDE);
   const right = Math.min(to, own.end + SIDE);
   return {

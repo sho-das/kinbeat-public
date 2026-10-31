@@ -6,7 +6,7 @@ export const SLICE_WIDTHS = [SLICE_LIMIT, 800];
 const MIN_FORBIDDEN_LENGTH = 4;
 
 // The one sentence a visitor sees when the safety check stops a finding from going to the AI.
-export const BLOCKED_REASON = 'Not sent to the AI, because we could not be sure the secret was fully hidden. Treat it as a real secret.';
+export const BLOCKED_REASON = 'We could not be sure the secret was fully hidden. Treat it as a real secret.';
 
 export type ScrubResult = { ok: true; slice: string } | { ok: false; error: string };
 
@@ -61,13 +61,14 @@ export function findingLeak(finding: FindingParts | null | undefined, forbidden:
 }
 
 // Keeps the finding, drops everything that could show the secret.
-export function withhold<T extends { place?: object | null }>(finding: T): T {
+export function withhold<T extends { place?: object | null; line?: unknown }>(finding: T, forbidden: string[] = []): T {
   const place = (finding.place as { file?: unknown } | null | undefined)?.file !== undefined ? { ...finding.place, file: '[file name hidden]' } : finding.place;
   // The caller's finding type has a judge field; the blocked judge below takes its place.
   return {
     ...finding,
     preview: 'Hidden for safety',
-    line: undefined,
+    // The line stays when it holds no copy of the value, so the visitor can still see where it sits.
+    line: finding.line && findingLeak({ line: finding.line }, forbidden) === null ? finding.line : undefined,
     place,
     judge: { status: 'blocked', error: 'Hidden for safety: its value also appears in text we would return.' },
   } as unknown as T;

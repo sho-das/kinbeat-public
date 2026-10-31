@@ -65,7 +65,7 @@ export interface ScanResult {
   findings: Finding[];
 }
 
-export type VerdictKind = "real" | "possible" | "example" | "off" | "unavailable" | "timeout" | "limit" | "blocked";
+export type VerdictKind = "real" | "possible" | "example" | "off" | "unavailable" | "timeout" | "limit";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -109,6 +109,16 @@ export function sourceLabel(finding: Finding): string | null {
   return finding.source ? SOURCES[finding.source] ?? finding.source : null;
 }
 
+// The address of the line on GitHub, at the commit that was scanned, so the line numbers match. GitHub highlights the line on landing.
+// Only for a line in a repository file. A page of a PDF or a picture has no line to open.
+export function githubLineUrl(repo: { owner: string; repo: string; sha: string } | undefined, place: Place): string | null {
+  // A file name the safety check hid is not a real path, so there is nothing to open.
+  if (!repo || !place.file || place.file === "[file name hidden]" || place.line === undefined || place.page !== undefined) return null;
+  if (!/^[A-Za-z0-9_.-]+$/.test(repo.owner) || !/^[A-Za-z0-9_.-]+$/.test(repo.repo) || !/^[0-9a-f]{40}$/.test(repo.sha)) return null;
+  const path = place.file.split("/").map(encodeURIComponent).join("/");
+  return `https://github.com/${repo.owner}/${repo.repo}/blob/${repo.sha}/${path}#L${place.line}`;
+}
+
 export function placeLabel(place: Place): string {
   if (place.file !== undefined) {
     const page = place.page !== undefined ? `, page ${place.page}` : "";
@@ -126,7 +136,8 @@ export function verdictKind(finding: Finding): VerdictKind {
   if (status === "unverified") return "possible";
   if (status === "timeout") return "timeout";
   if (status === "limit") return "limit";
-  if (status === "blocked") return "blocked";
+  // A finding the safety check hid is shown as real: it could not be judged, and the advice is to treat it as a real secret.
+  if (status === "blocked") return "real";
   if (status !== "ok") return "unavailable";
   // A rule that found only a word like "token", with no key shape, is not enough to call a finding real.
   if (finding.judge.verdict === "real") return finding.confidence.level === "low" ? "possible" : "real";
