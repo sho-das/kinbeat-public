@@ -82,7 +82,7 @@ export default function Home() {
               {C.scanSection.title}
             </h2>
             <p className="strip">
-              <strong>{C.scanSection.strip}</strong> <span>{C.scanSection.stripNote}</span>
+              <strong>{C.scanSection.strip}</strong>
             </p>
             <Scanner />
           </div>

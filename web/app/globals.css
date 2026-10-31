@@ -349,4 +349,3 @@ footer.foot{background:var(--navy)}
 .ghlink:hover,.ghlink:focus-visible{background:var(--orange);color:var(--black)}
 
 .strip{margin:-8px 0 28px;font-size:1.125rem;line-height:1.4}
-.strip span{display:block;margin-top:4px;opacity:.75;font-size:1rem}

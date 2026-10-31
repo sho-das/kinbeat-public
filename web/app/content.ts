@@ -118,7 +118,6 @@ export const content = {
   scanSection: {
     title: "Try a free scan",
     strip: "KinBeat has checked over 15,000 cases, and 98.72% success rate.",
-    stripNote: "Our own test set, rerun after every change.",
   },
   faq: {
     title: "Questions",
