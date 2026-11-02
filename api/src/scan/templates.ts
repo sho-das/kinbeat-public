@@ -8,23 +8,23 @@ export interface Template {
   secrets: string[];
 }
 
-const AWS_PLAIN = 'AKIAFAKEFAKEFAKE0001';
-const GITHUB_PLAIN = 'ghp_' + 'FAKE'.repeat(9);
-const SLACK_PLAIN = 'xox' + 'b-0000000000-FAKEFAKEFAKEFAKE';
+const AWS_PLAIN = 'AKIAQ7MZT3WXLB95PF2E';
+const GITHUB_PLAIN = 'ghp_' + '6NawbFygFa7lRY43gOv62pltuXbkWpAtvpD9';
+const SLACK_PLAIN = 'xox' + 'b-6809077257-ZlFTDgy2jQJ0YFFL';
 const AWS_EXAMPLE = 'AKIAFAKEEXAMPLEKEY12';
-const AWS_SPELLED = 'AKIAFAKEFAKEFAKE1234';
-const AWS_INJECTED = 'AKIAFAKEPROMPTKEY123';
-const NOTE_PASSWORD = 'FAKE-Passw0rd-9981';
+const AWS_SPELLED = 'AKIAUXWAWDVEYRES1234';
+const AWS_INJECTED = 'AKIA4N43LN7CKSZ70VDH';
+const NOTE_PASSWORD = 'lqt4Su-aKtwY-5762';
 const NATO_CODE = 'a7b9c2d4e8';
 const NATO_SPOKEN = 'alpha seven bravo nine charlie two delta four echo eight';
-const URL_PASSWORD = 'FAKE-Passw0rd-7731';
-const PEM_BODY = ['FAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEY00', 'FAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEY11'];
+const URL_PASSWORD = '2cyRwm-WWIIB-2718';
+const PEM_BODY = ['euk9viLIRp8xxaZOvf6+H276+tsiedWzeYea7js8TJpoWDjDN+b', 'xBesg+XUwe8JY0cJeONevvUm7+dhuiKt974XGI1X411qcBQO/0Q'];
 const PEM = ['-----BEGIN RSA PRIVATE KEY-----', ...PEM_BODY, '-----END RSA PRIVATE KEY-----'].join('\n');
 
 const GITHUB_BASE64 = Buffer.from(GITHUB_PLAIN).toString('base64');
 const SLACK_HEX = Buffer.from(SLACK_PLAIN).toString('hex');
 const SPELLED_WORDS = ['one', 'two', 'three', 'four'];
-const SPELLED_TEXT = [...'AKIAFAKEFAKEFAKE'].join(' ') + ' ' + SPELLED_WORDS.join(' ');
+const SPELLED_TEXT = [...'AKIAUXWAWDVEYRES'].join(' ') + ' ' + SPELLED_WORDS.join(' ');
 const URL_ENCODED = encodeURIComponent(`password=${URL_PASSWORD}!`);
 const SPLIT_FIRST = GITHUB_PLAIN.slice(0, 24);
 const SPLIT_SECOND = GITHUB_PLAIN.slice(24);
@@ -64,8 +64,8 @@ export const TEMPLATES: Template[] = [
     description: 'A GitHub token hidden as base64.',
     lines: [
       'Subject: handover',
-      'Hi Priya,',
-      `The CI login is below, encoded so it is not readable at a glance: ${GITHUB_BASE64}`,
+      'Hi Zhang,',
+      `The CI login access token is not working: ${GITHUB_BASE64}`,
       'Regards, Omar',
     ],
     expect: { types: ['github_token'], verdict: 'real', findings: 1 },
@@ -85,7 +85,7 @@ export const TEMPLATES: Template[] = [
     title: 'Key spelled out in chat',
     kind: 'chat',
     description: 'An AWS key typed with spaces and number words.',
-    lines: ['[14:02] ana: the filter blocks keys so I will spell it', `[14:03] ana: ${SPELLED_TEXT}`, '[14:04] raj: got it'],
+    lines: ['[14:02] amy: the filter blocks keys so I will spell it', `[14:03] amy: ${SPELLED_TEXT}`, '[14:04] mike: got it'],
     expect: { types: ['aws_key'], verdict: 'real', findings: 1 },
     secrets: [AWS_SPELLED, SPELLED_TEXT],
   },
@@ -94,7 +94,15 @@ export const TEMPLATES: Template[] = [
     title: 'Token split over two messages',
     kind: 'chat',
     description: 'A GitHub token sent as two chat messages in a row.',
-    lines: ['[10:00] dana: sending the token in two parts', `[10:01] dana: ${SPLIT_FIRST}`, `[10:01] dana: ${SPLIT_SECOND}`, '[10:02] kim: ok'],
+    lines: [
+      '[10:00] oliver: sending in 2 mins',
+      `[10:02] oliver: ${SPLIT_FIRST}`,
+      `[10:02] oliver: ${SPLIT_SECOND}`,
+      '[10:02] oliver: you can try now',
+      '[10:03] harriet: two tokens?',
+      '[10:03] oliver: No, it is broken in two parts to be safe',
+      '[10:04] harriet: works 👍',
+    ],
     expect: { types: ['github_token'], verdict: 'real', findings: 1 },
     secrets: [GITHUB_PLAIN, SPLIT_FIRST, SPLIT_SECOND],
   },
@@ -150,9 +158,9 @@ export const TEMPLATES: Template[] = [
     kind: 'chat',
     description: 'Two halves of a token sent by different people hours apart. They must not be joined.',
     lines: [
-      `[09:00] ravi: ${SPLIT_FIRST}`,
-      '[11:00] ravi: lunch at one?',
-      `[13:30] meera: ${SPLIT_SECOND}`,
+      `[09:00] jake: ${SPLIT_FIRST}`,
+      '[11:00] jake: lunch at one?',
+      `[13:30] ashley: ${SPLIT_SECOND}`,
     ],
     expect: { types: [], findings: 0 },
     secrets: [GITHUB_PLAIN, SPLIT_FIRST, SPLIT_SECOND],

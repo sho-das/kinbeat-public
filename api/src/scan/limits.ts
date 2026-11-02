@@ -9,20 +9,6 @@ export const numberEnv = (name: string, fallback: number): number => {
   return Number.isFinite(value) && value >= 0 ? value : fallback;
 };
 
-// Runs fn over the items with at most `limit` at a time. Results come back in the order of the items.
-export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>, signal?: AbortSignal): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length && !signal?.aborted) {
-      const index = next++;
-      results[index] = await fn(items[index], index);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
-  return results;
-}
-
 // At most `max` calls run at once. The others wait in the order they came. max of 0 or less means no limit.
 export class Gate {
   private live = 0;

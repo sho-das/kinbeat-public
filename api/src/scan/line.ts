@@ -1,9 +1,11 @@
 import { Candidate } from './types';
 
-export interface MaskedLine {
+interface MaskedLine {
   before: string;
   mark: string;
   after: string;
+  // A value split over several lines (two chat messages) shows each of its other lines too.
+  more?: Array<Omit<MaskedLine, 'more'>>;
 }
 
 const SIDE = 70;
@@ -11,13 +13,27 @@ const MAX_MARK = 40;
 
 // The line a finding sits on, with every found value replaced by stars. The value of this finding is kept apart so the page can highlight it.
 export function maskedLine(text: string, candidates: Candidate[], candidate: Candidate, forbidden: string[] = []): MaskedLine {
-  const own = candidate.spans[0];
+  // One line per line the value touches: a span on a line already shown is not shown again.
+  const shown: number[] = [];
+  const lines = candidate.spans.flatMap((own) => {
+    if (shown.some((start) => sameLine(text, start, own.start))) return [];
+    shown.push(own.start);
+    return [lineAround(text, candidates, own, forbidden)];
+  });
+  const [first, ...more] = lines;
+  return more.length ? { ...first, more } : first;
+}
+
+const sameLine = (text: string, a: number, b: number) => !text.slice(Math.min(a, b), Math.max(a, b)).includes('\n');
+
+function lineAround(text: string, candidates: Candidate[], own: Candidate['spans'][number], forbidden: string[]): MaskedLine {
   const from = text.lastIndexOf('\n', own.start - 1) + 1;
   const stop = text.indexOf('\n', own.end);
   const to = stop === -1 ? text.length : stop;
   const spans = candidates
     .flatMap((c) => c.spans)
-    .filter((s) => s.start >= from && s.end <= to && s !== own && (s.end <= own.start || s.start >= own.end))
+    // A value that spans several lines (a YAML block, a key) is hidden on every line it touches, not only where it starts.
+    .filter((s) => s.start < to && s.end > from && s !== own && (s.end <= own.start || s.start >= own.end))
     .sort((a, b) => a.start - b.start);
   const hide = (start: number, end: number): string => {
     let out = '';

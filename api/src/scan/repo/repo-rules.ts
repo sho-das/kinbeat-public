@@ -2,7 +2,7 @@
 // The free scan reads current files only. The full version will also read what is skipped here (dependencies, logs,
 // pictures, lock files, minified files), old commits, deleted files and private repositories.
 
-export interface RepoLink {
+interface RepoLink {
   owner: string;
   repo: string;
   // The text after /tree/ (a branch name, maybe followed by a folder), or null for the default branch.

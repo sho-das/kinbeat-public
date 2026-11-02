@@ -1,7 +1,7 @@
 import type { ScanResult } from "./scan";
 
 const CACHE_KEY = "kb_saved_results";
-const CACHE_VERSION = "1";
+const CACHE_VERSION = "2";
 export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 20;
 
@@ -64,8 +64,7 @@ async function sha256(data: ArrayBuffer | string): Promise<string> {
 }
 
 // The same input gives the same key. A file is identified by its name, size and the hash of its bytes.
-export async function inputKey(input: { sample?: string; text?: string; file?: File | null }): Promise<string> {
-  if (input.sample) return sha256(`${CACHE_VERSION}|sample|${input.sample}`);
+export async function inputKey(input: { text?: string; file?: File | null }): Promise<string> {
   if (input.text !== undefined) return sha256(`${CACHE_VERSION}|paste|${input.text}`);
   const f = input.file;
   return sha256(`${CACHE_VERSION}|file|${f ? `${f.name}:${f.size}:${await sha256(await f.arrayBuffer())}` : ""}`);

@@ -1,6 +1,7 @@
 export type Unit = 'line' | 'message';
 export type Encoding = 'plain' | 'base64' | 'hex' | 'url' | 'spelled' | 'stitched' | 'reversed';
-export type Verdict = 'real' | 'example' | 'unsure';
+// example and not_secret are hidden from the page; real is shown, unsure shows as possible.
+export type Verdict = 'real' | 'example' | 'unsure' | 'not_secret';
 export type Level = 'high' | 'medium' | 'low';
 
 export interface Span {
@@ -14,6 +15,8 @@ export interface RawMatch {
   start: number;
   end: number;
   score: number;
+  // Found by the weak name: value rule, the only rule whose finds our rule book may call not a secret.
+  weak?: boolean;
 }
 
 export interface Candidate {
@@ -22,6 +25,7 @@ export interface Candidate {
   spans: Span[];
   encoding: Encoding;
   score: number;
+  weak?: boolean;
 }
 
 export interface JudgeResult {
@@ -29,11 +33,10 @@ export interface JudgeResult {
   verified?: boolean;
   width?: number;
   widened?: boolean;
-  calls?: number;
   mode: 'mock' | 'live' | 'rule';
   model: string;
   verdict: Verdict;
-  confidence: number;
+  // One of the codes or our own keys in reasons.ts. The reason is always the fixed sentence for it.
+  code?: string;
   reason: string;
-  error?: string;
 }

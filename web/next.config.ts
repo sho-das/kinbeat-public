@@ -1,4 +1,10 @@
 import type { NextConfig } from "next";
+import { loadEnvConfig } from "@next/env";
+import path from "node:path";
+
+// All settings live in one file, .env at the repository root, shared with the API. The website runs from web/.
+// Next has already looked in web/ and keeps that result, so the root file is loaded with a forced reload.
+loadEnvConfig(path.join(process.cwd(), ".."), process.env.NODE_ENV !== "production", undefined, true);
 
 const apiUrl = process.env.API_URL || "http://127.0.0.1:4100";
 

@@ -1,17 +1,21 @@
 import { BadGatewayException, BadRequestException, Inject, Injectable, NotFoundException, Optional, PayloadTooLargeException } from '@nestjs/common';
 import { branchCandidates } from './repo-rules';
 
-export const FETCH = Symbol('FETCH');
+const FETCH = Symbol('FETCH');
 // Pictures and videos fill most of a small website, so the download limit is higher than what is read from it.
 export const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;
 // A private repository is the visitor's own, so it gets a higher limit.
 export const MAX_PRIVATE_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+// One pull request's changes. A larger diff is left out of a history scan and counted as not scanned.
+export const MAX_PULL_DIFF_BYTES = 1024 * 1024;
+// A pull request with more than 300 changed files. Its diff is refused by GitHub, so its files are read page by page instead.
+export const OVER_300_FILES = Symbol('over-300-files');
 const STEP_TIMEOUT_MS = 30_000;
 const SHA = /^[0-9a-f]{40}$/;
 const NOT_FOUND = 'Repository not found, or it is not public.';
 // One answer for a wrong token, a token without access and a missing repository, so a private repository cannot be told apart.
 export const NO_ACCESS = "We could not open that repository with this token. Check the link and the token's access.";
-const TOKEN_BUSY = 'GitHub is busy. Try again in a minute.';
+export const TOKEN_BUSY = 'GitHub is busy. Try again in a minute.';
 const HEADERS = { 'user-agent': 'KinBeat-repo-scan' };
 
 // The only GitHub addresses the server calls, built here from a checked owner and repository, never from user text.
@@ -19,6 +23,28 @@ const HEADERS = { 'user-agent': 'KinBeat-repo-scan' };
 const bearer = (token?: string): Record<string, string> => (token ? { authorization: `Bearer ${token}` } : {});
 // GitHub answers a used-up allowance with 403 or 429, and says how much is left in a header.
 const isLimited = (response: Response) => response.status === 429 || (response.status === 403 && (response.headers.get('x-ratelimit-remaining') === '0' || response.headers.has('retry-after')));
+
+// Reads a download, counting its size as it streams in. Null when it is, or turns out to be, over max bytes.
+async function readCapped(body: ReadableStream<Uint8Array>, headers: Headers, max: number): Promise<Buffer | null> {
+  if (Number(headers.get('content-length')) > max) {
+    await body.cancel();
+    return null;
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const reader = body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
+}
 
 @Injectable()
 export class GithubClient {
@@ -76,6 +102,79 @@ export class GithubClient {
     return { sha: text };
   }
 
+  // One call to api.github.com with the token. GitHub moves some repositories to their ID address, so one such redirect is followed,
+  // and only when it stays on api.github.com with the same ID path. Any other answer is read as the token or access being wrong, or the repository missing.
+  private async apiGet(url: string, accept: string, signal: AbortSignal | undefined, token: string): Promise<Response> {
+    let response = await this.call(url, 'GET', signal, { accept, ...bearer(token) });
+    if (response.status === 301) {
+      const moved = /^https:\/\/api\.github\.com\/repositories\/\d+\//.exec(response.headers.get('location') ?? '');
+      if (moved) response = await this.call(response.headers.get('location') as string, 'GET', signal, { accept, ...bearer(token) });
+    }
+    if (isLimited(response)) throw new BadGatewayException(TOKEN_BUSY);
+    if ([301, 401, 403, 404, 422].includes(response.status)) throw new NotFoundException(NO_ACCESS);
+    return response;
+  }
+
+  // The changed files of one pull request, 100 per page, for a pull request too big for one diff (over 300 files).
+  // Each file's own patch is joined under a header, so the same line reader can read it. A file without a patch (too big for GitHub) is counted, not read.
+  // Up to 3,000 files are read (up to 31 calls, the 31st only to check there are no more). Null when the joined text is over 1 MB.
+  async pullFiles(owner: string, repo: string, number: number, signal: AbortSignal | undefined, token: string): Promise<{ patch: string; notRead: number } | null> {
+    const parts: string[] = [];
+    let notRead = 0;
+    let total = 0;
+    for (let page = 1; page <= 31; page++) {
+      const response = await this.apiGet(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}/files?per_page=100&page=${page}`, 'application/vnd.github+json', signal, token);
+      if (response.status !== 200) throw new BadGatewayException('GitHub did not send the file list. Try again in a moment.');
+      const files = (await response.json()) as Array<{ filename?: unknown; patch?: unknown }>;
+      if (!Array.isArray(files) || files.length === 0) return { patch: parts.join(''), notRead };
+      // A 31st page with files means the pull request has more than 3,000 files, so it is not read.
+      if (page > 30) return null;
+      for (const file of files) {
+        if (typeof file.filename !== 'string' || typeof file.patch !== 'string') {
+          notRead++;
+          continue;
+        }
+        const part = `diff --git a/${file.filename} b/${file.filename}\n--- a/${file.filename}\n+++ b/${file.filename}\n${file.patch}\n`;
+        total += part.length;
+        if (total > MAX_PULL_DIFF_BYTES) return null;
+        parts.push(part);
+      }
+      if (files.length < 100) return { patch: parts.join(''), notRead };
+    }
+    return null;
+  }
+
+  // The newest merged pull requests, first page first, with a token only. Closed but unmerged pull requests are skipped.
+  // Each page is one call, so 100 pull requests cost one call. The list stops at the wanted count or at an empty page.
+  async mergedPulls(owner: string, repo: string, wanted: number, signal: AbortSignal | undefined, token: string): Promise<number[]> {
+    const numbers: number[] = [];
+    for (let page = 1; numbers.length < wanted && page <= 50; page++) {
+      const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`;
+      const response = await this.apiGet(url, 'application/vnd.github+json', signal, token);
+      if (response.status !== 200) throw new BadGatewayException('GitHub did not answer as expected. Try again in a moment.');
+      const data = (await response.json()) as Array<{ number?: unknown; merged_at?: unknown }>;
+      if (!Array.isArray(data) || data.length === 0) break;
+      for (const pull of data) {
+        if (typeof pull.number === 'number' && typeof pull.merged_at === 'string' && numbers.length < wanted) numbers.push(pull.number);
+      }
+    }
+    return numbers;
+  }
+
+  // The added and removed lines of one pull request, as GitHub's patch text. Null when it is over 1 MB, so one huge pull request cannot fill the scan.
+  async pullDiff(owner: string, repo: string, number: number, signal: AbortSignal | undefined, token: string): Promise<string | null | typeof OVER_300_FILES> {
+    const response = await this.apiGet(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}`, 'application/vnd.github.diff', signal, token);
+    if (response.status === 406) {
+      // GitHub refuses a whole diff with more than 300 files and says so. The caller reads the files page by page instead.
+      const text = await response.text();
+      if (text.includes('maximum number of files')) return OVER_300_FILES;
+      throw new BadGatewayException('GitHub did not send the changes. Try again in a moment.');
+    }
+    if (response.status !== 200 || !response.body) throw new BadGatewayException('GitHub did not send the changes. Try again in a moment.');
+    const body = await readCapped(response.body, response.headers, MAX_PULL_DIFF_BYTES);
+    return body ? body.toString('utf8') : null;
+  }
+
   // When the commit was made and its web address. Only asked on a fresh scan, and a failure only means the date is left out.
   async commitInfo(owner: string, repo: string, sha: string, signal?: AbortSignal): Promise<{ at: string | null; url: string }> {
     const url = `https://github.com/${owner}/${repo}/commit/${sha}`;
@@ -100,24 +199,9 @@ export class GithubClient {
     if (response.status !== 200 || !response.body) throw new BadGatewayException('GitHub did not send the files. Try again in a moment.');
     const max = token ? MAX_PRIVATE_DOWNLOAD_BYTES : MAX_DOWNLOAD_BYTES;
     const tooBig = () => new PayloadTooLargeException(`This repository is over ${max / (1024 * 1024)} MB to download, which is the most we can scan for now.`);
-    if (Number(response.headers.get('content-length')) > max) {
-      await response.body.cancel();
-      throw tooBig();
-    }
-    const chunks: Buffer[] = [];
-    let total = 0;
-    const reader = response.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.length;
-      if (total > max) {
-        await reader.cancel();
-        throw tooBig();
-      }
-      chunks.push(Buffer.from(value));
-    }
-    return Buffer.concat(chunks);
+    const body = await readCapped(response.body, response.headers, max);
+    if (!body) throw tooBig();
+    return body;
   }
 
   // The API answers with a redirect to the download host, which carries its own short-lived link.

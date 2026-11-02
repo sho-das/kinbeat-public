@@ -22,6 +22,7 @@ export function Nav() {
           </svg>
         </button>
         <a className="brand" href="#top" aria-label="KinBeat, home">
+          <i className="brand__dot" aria-hidden="true" />
           <Wordmark />
         </a>
         <nav id="nav-links" className={open ? "nav__links open" : "nav__links"} aria-label="Page">
@@ -31,7 +32,7 @@ export function Nav() {
             </a>
           ))}
         </nav>
-        <a className="btn nav__cta" href="#contact">
+        <a className="nav__cta" href="#contact">
           {C.cta.nav}
         </a>
       </div>

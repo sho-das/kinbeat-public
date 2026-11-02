@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { MAX_READ_CHARS } from '../muse.client';
 import { readDocx } from './docx';
 import { PictureBudget, PictureReader } from './picture-reader';
 import { readPdf } from './pdf';
@@ -106,7 +107,7 @@ export class ExtractorService {
         if (slack) text = slack.text;
         const truncated = text.length > MAX_TEXT_CHARS;
         if (truncated) text = text.slice(0, MAX_TEXT_CHARS);
-        const notes = [slack ? `Read as ${slack.messages} Slack messages, one per line.` : '', truncated ? `Only the first ${MAX_TEXT_CHARS} characters were scanned.` : ''].filter(Boolean);
+        const notes = [slack ? `Read as ${slack.messages} Slack messages, one per line.` : '', truncated ? `Only the first ${MAX_TEXT_CHARS.toLocaleString('en-US')} characters were scanned.` : ''].filter(Boolean);
         return {
           segments: [{ file: name, text, source: 'text' }],
           report: { file: name, type: slack ? 'slack' : 'text', ...(notes.length ? { note: notes.join(' ') } : {}) },
@@ -118,7 +119,8 @@ export class ExtractorService {
       }
       if (sniffed.kind === 'pdf') return await this.extractPdf(name, file.buffer, signal, pictures);
       const read = await this.readPicture(name, file.buffer, 'image-read', undefined, signal, pictures);
-      return { segments: read.segments, report: { file: name, type: sniffed.kind, ...(read.notRead ? { note: `Not read: ${read.notRead}`, notRead: true } : {}) } };
+      const cutNote = read.cut ? `Only the first ${MAX_READ_CHARS.toLocaleString('en-US')} characters of text in this picture were scanned. Please check the rest of this picture yourself.` : '';
+      return { segments: read.segments, report: { file: name, type: sniffed.kind, ...(read.notRead ? { note: `Not read: ${read.notRead}`, notRead: true } : cutNote ? { note: cutNote } : {}) } };
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof ExtractCancelled) throw error;
       this.logger.warn(`extract failed type=${sniffed.kind} error=${(error as Error).name}`);
@@ -128,11 +130,11 @@ export class ExtractorService {
   }
 
   // Muse reads one picture or one scanned page. When it cannot, the reason is returned, so the result never says "clean".
-  private async readPicture(file: string, image: Buffer, source: 'image-read' | 'pdf-read', page: number | undefined, signal: AbortSignal | undefined, pictures: PictureBudget): Promise<{ segments: Segment[]; notRead?: string }> {
+  private async readPicture(file: string, image: Buffer, source: 'image-read' | 'pdf-read', page: number | undefined, signal: AbortSignal | undefined, pictures: PictureBudget): Promise<{ segments: Segment[]; notRead?: string; cut?: boolean }> {
     if (!pictures.take()) return { segments: [], notRead: 'The picture limit for one scan was reached.' };
     const read = await this.reader.read(image, signal);
     if (read.status === 'not-read') return { segments: [], notRead: read.reason };
-    return { segments: read.text ? [{ file, ...(page !== undefined ? { page } : {}), source, text: read.text }] : [] };
+    return { segments: read.text ? [{ file, ...(page !== undefined ? { page } : {}), source, text: read.text }] : [], ...(read.cut ? { cut: true } : {}) };
   }
 
   private async extractPdf(name: string, buffer: Buffer, signal: AbortSignal | undefined, pictures: PictureBudget): Promise<Extraction> {
@@ -141,6 +143,7 @@ export class ExtractorService {
     const notSupportedPages: number[] = [];
     let imagePages = 0;
     const notReadPages: number[] = [];
+    const cutPages: number[] = [];
     let notReadReason = '';
     for (const page of read.pages) {
       if (page.notSupported) {
@@ -153,12 +156,15 @@ export class ExtractorService {
         } else {
           imagePages++;
           segments.push(...read.segments);
+          if (read.cut) cutPages.push(page.page);
         }
       } else {
         segments.push({ file: name, page: page.page, text: page.text, source: 'pdf-text' });
       }
       if (page.annotations) segments.push({ file: name, page: page.page, text: page.annotations, source: 'pdf-text' });
     }
+    const cutNote = cutPages.map((page) => `Only the first ${MAX_READ_CHARS.toLocaleString('en-US')} characters of text on page ${page} were scanned. Please check the rest of this page yourself.`).join(' ');
+    const notes = [notReadPages.length ? `Not read: ${notReadReason}` : '', notSupportedPages.length ? 'Some pages were not read: page limits reached. Those pages are not supported in this scan.' : '', cutNote].filter(Boolean);
     return {
       segments,
       report: {
@@ -166,8 +172,9 @@ export class ExtractorService {
         type: 'pdf',
         pages: read.totalPages,
         imagePages,
-        ...(notReadPages.length ? { notReadPages, note: `Not read: ${notReadReason}` } : {}),
-        ...(notSupportedPages.length ? { notSupportedPages, note: `${notReadPages.length ? `Not read: ${notReadReason} ` : ''}Some pages were not read: page limits reached. Those pages are not supported in this scan.` } : {}),
+        ...(notReadPages.length ? { notReadPages } : {}),
+        ...(notSupportedPages.length ? { notSupportedPages } : {}),
+        ...(notes.length ? { note: notes.join(' ') } : {}),
       },
     };
   }

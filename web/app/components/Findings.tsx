@@ -3,15 +3,12 @@
 import { useState } from "react";
 import { content } from "../content";
 import {
-  confidenceLevel,
-  confidenceText,
   encodingLabel,
   githubLineUrl,
   placeLabel,
   typeLabel,
   verdictKind,
   type Finding,
-  type VerdictKind,
 } from "../lib/scan";
 
 const R = content.right;
@@ -35,26 +32,13 @@ function VerdictTag({ kind }: { kind: keyof typeof R.verdict }) {
   );
 }
 
-function Confidence({ finding }: { finding: Finding }) {
-  const level = confidenceLevel(finding);
-  return (
-    <span className="conf">
-      <svg viewBox="0 0 36 24" aria-hidden="true">
-        {[0, 1, 2].map((i) => {
-          const h = 8 + i * 8;
-          return <rect key={i} x={i * 13 + 1} y={23 - h} width={9} height={h - 1} rx={1} className={i < level ? "on" : "off"} />;
-        })}
-      </svg>
-      <span>{confidenceText(finding)}</span>
-    </span>
-  );
-}
-
-export function FindingCard({ finding, index, repo }: { finding: Finding; index: number; scanId?: string; scanLabel?: string; repo?: { owner: string; repo: string; sha: string } }) {
+export function FindingCard({ finding, index, repo }: { finding: Finding; index: number; repo?: { owner: string; repo: string; sha: string } }) {
   const githubUrl = githubLineUrl(repo, finding.place);
   const kind = verdictKind(finding);
   const asked = kind !== "off";
-  const reason = asked ? finding.judge.reason ?? finding.judge.error ?? "" : R.reasonOff;
+  const reason = asked ? finding.judge.reason || "" : R.reasonOff;
+  // A reason that asks the visitor to check by hand links straight to that line, when we know it.
+  const checkLink = githubUrl && /Please check/.test(reason) ? githubUrl : null;
   const [open, setOpen] = useState(true);
   const [showLine, setShowLine] = useState(false);
   const tag = kind === "timeout" || kind === "limit";
@@ -87,16 +71,11 @@ export function FindingCard({ finding, index, repo }: { finding: Finding; index:
             {githubUrl && <GithubLink url={githubUrl} />}
           </dd>
         </div>
-        <div>
-          <dt>{R.confidence}</dt>
-          <dd>
-            <Confidence finding={finding} />
-          </dd>
-        </div>
         <div className="reason">
           <dt>{R.reason}</dt>
           <dd>
             {[finding.encoding === "plain" ? "" : `${R.hiddenAs} ${encodingLabel(finding).toLowerCase()}.`, finding.found, reason].filter(Boolean).join(" ")}
+            {checkLink && <GithubLink url={checkLink} />}
             {finding.line && (
               <>
                 {" "}
@@ -108,6 +87,14 @@ export function FindingCard({ finding, index, repo }: { finding: Finding; index:
                     {finding.line.before}
                     <mark>{finding.line.mark}</mark>
                     {finding.line.after}
+                    {finding.line.more?.map((m, i) => (
+                      <span key={i}>
+                        {"\n"}
+                        {m.before}
+                        <mark>{m.mark}</mark>
+                        {m.after}
+                      </span>
+                    ))}
                   </pre>
                 )}
               </>

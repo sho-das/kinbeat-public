@@ -22,11 +22,9 @@ interface Judge {
   widened?: boolean;
   facts?: string;
   verdict?: string;
-  confidence?: number;
   reason?: string;
   model?: string;
   slice?: string;
-  error?: string;
 }
 
 export interface Finding {
@@ -34,7 +32,8 @@ export interface Finding {
   type: string;
   encoding: string;
   found?: string;
-  line?: { before: string; mark: string; after: string };
+  // more: the other lines of a value split over several lines, such as two chat messages.
+  line?: { before: string; mark: string; after: string; more?: Array<{ before: string; mark: string; after: string }> };
   source?: string;
   place: Place;
   preview: string;
@@ -61,13 +60,15 @@ export interface ScanResult {
   confidenceNote?: string;
   files?: FileNote[];
   repo?: { owner: string; repo: string; sha: string; files: number; skipped: Record<string, number>; note: string };
+  // A Slack scan: the chat, how many messages were read, and where the next scan carries on, if there are more.
+  slack?: { messages: number; read: number; next?: string };
   summary: { findings: number; blocked: number; errors: number; unread?: number; unverified?: number; timeouts?: number; limited?: number };
   findings: Finding[];
 }
 
-export type VerdictKind = "real" | "possible" | "example" | "off" | "unavailable" | "timeout" | "limit";
+type VerdictKind = "real" | "possible" | "example" | "off" | "unavailable" | "timeout" | "limit";
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 const ENCODINGS: Record<string, string> = {
   plain: "Plain text, nothing hidden",
@@ -77,14 +78,6 @@ const ENCODINGS: Record<string, string> = {
   spelled: "Spelled-out letters or words",
   stitched: "Split over messages",
   reversed: "Written backwards",
-};
-
-const SOURCES: Record<string, string> = {
-  text: "Text",
-  "pdf-text": "PDF text",
-  "pdf-read": "PDF page read as a picture",
-  "image-read": "Image read as a picture",
-  docx: "Word document",
 };
 
 const TYPES: Record<string, string> = {
@@ -105,10 +98,6 @@ export function encodingLabel(finding: Finding): string {
   return ENCODINGS[finding.encoding] ?? finding.encoding;
 }
 
-export function sourceLabel(finding: Finding): string | null {
-  return finding.source ? SOURCES[finding.source] ?? finding.source : null;
-}
-
 // The address of the line on GitHub, at the commit that was scanned, so the line numbers match. GitHub highlights the line on landing.
 // Only for a line in a repository file. A page of a PDF or a picture has no line to open.
 export function githubLineUrl(repo: { owner: string; repo: string; sha: string } | undefined, place: Place): string | null {
@@ -116,7 +105,8 @@ export function githubLineUrl(repo: { owner: string; repo: string; sha: string }
   if (!repo || !place.file || place.file === "[file name hidden]" || place.line === undefined || place.page !== undefined) return null;
   if (!/^[A-Za-z0-9_.-]+$/.test(repo.owner) || !/^[A-Za-z0-9_.-]+$/.test(repo.repo) || !/^[0-9a-f]{40}$/.test(repo.sha)) return null;
   const path = place.file.split("/").map(encodeURIComponent).join("/");
-  return `https://github.com/${repo.owner}/${repo.repo}/blob/${repo.sha}/${path}#L${place.line}`;
+  // plain=1 shows the file as text, so GitHub can mark the line even in files it would otherwise show formatted, such as Markdown.
+  return `https://github.com/${repo.owner}/${repo.repo}/blob/${repo.sha}/${path}?plain=1#L${place.line}`;
 }
 
 export function placeLabel(place: Place): string {
@@ -128,6 +118,16 @@ export function placeLabel(place: Place): string {
   const noun = place.unit === "message" ? "message" : "line";
   if (place.endIndex !== undefined && place.endIndex !== place.index) return `${noun}s ${place.index} to ${place.endIndex}`;
   return `${noun} ${place.index}`;
+}
+
+// Both AI calls said example or not a secret, so the finding is not shown. The scan record still keeps it.
+export function hiddenFromPage(finding: Finding): boolean {
+  return finding.judge.status === "ok" && (finding.judge.verdict === "example" || finding.judge.verdict === "not_secret");
+}
+
+// The AI call for this finding failed, timed out or hit a limit, so it goes under Not scanned instead of the list.
+export function notChecked(finding: Finding): boolean {
+  return finding.judge.status === "timeout" || finding.judge.status === "error" || finding.judge.status === "limit";
 }
 
 export function verdictKind(finding: Finding): VerdictKind {
@@ -143,15 +143,6 @@ export function verdictKind(finding: Finding): VerdictKind {
   if (finding.judge.verdict === "real") return finding.confidence.level === "low" ? "possible" : "real";
   if (finding.judge.verdict === "example") return "example";
   return "possible";
-}
-
-export function confidenceLevel(finding: Finding): number {
-  return finding.confidence.level === "high" ? 3 : finding.confidence.level === "medium" ? 2 : 1;
-}
-
-export function confidenceText(finding: Finding): string {
-  const level = finding.confidence.level.charAt(0).toUpperCase() + finding.confidence.level.slice(1);
-  return `${level} (${Math.round(finding.confidence.score * 100)} of 100)`;
 }
 
 export function fileProblem(file: File | null): string {

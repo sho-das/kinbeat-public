@@ -7,15 +7,17 @@ import { isSafePath, readZip, zipNames } from '../extract/zip';
 import { GithubClient, MAX_DOWNLOAD_BYTES, MAX_PRIVATE_DOWNLOAD_BYTES, NO_ACCESS } from './github.client';
 import { insideRepo, isPicture, parseRepoLink, skipReason } from './repo-rules';
 import { RepoCache } from './repo.cache';
+import { Progress } from '../progress';
 
-export const REPO_FILE_LIMIT = 200;
+const REPO_FILE_LIMIT = 200;
 // Each picture is one call to the model, so a repository full of pictures is read only up to this many.
-export const REPO_PICTURE_LIMIT = 10;
+const REPO_PICTURE_LIMIT = 10;
 const MAX_UNPACKED_BYTES = 50 * 1024 * 1024;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const SCANNER_VERSION = '1';
+// 2: reasons are fixed sentences, so results saved with the AI's own sentences are not served again.
+const SCANNER_VERSION = '3';
 const NOT_FOUND = 'Repository not found, or it is not public.';
-export const REPO_NOTE = 'Current files only. Old commits and deleted files were not checked.';
+const REPO_NOTE = 'Current files only. Old commits and deleted files were not checked.';
 const MB = 1024 * 1024;
 // Said when a limit left files out, so the visitor knows why and by how much.
 const limitNote = (token?: string) => `Some files were not scanned. For now we scan up to ${REPO_FILE_LIMIT} files, ${(token ? MAX_PRIVATE_DOWNLOAD_BYTES : MAX_DOWNLOAD_BYTES) / MB} MB to download and ${MAX_UNPACKED_BYTES / MB} MB unpacked.`;
@@ -35,7 +37,7 @@ export class RepoScanService {
 
   // A scan with a token is private. The token is used for this one scan and is passed down, never stored on the service.
   // A private scan never reads or writes the shared saved results, never clears one, and is not written to the 30 day record or the log.
-  async scan(link: string, useModel: boolean, owner: string | undefined, signal: AbortSignal, token?: string): Promise<Result> {
+  async scan(link: string, useModel: boolean, owner: string | undefined, signal: AbortSignal, token?: string, progress?: Progress): Promise<Result> {
     const parsed = parseRepoLink(link);
     if (!parsed) throw new BadRequestException('Use a link like https://github.com/owner/repository.');
     const latest = await this.github.resolve(parsed.owner, parsed.repo, parsed.refPath, signal, token);
@@ -59,10 +61,11 @@ export class RepoScanService {
     }
 
     // No joining of a scan another visitor started: it would end when that visitor leaves. Each visitor runs their own.
-    return this.build(ownerName, repoName, slug, latest.sha, key, useModel, owner, signal, token);
+    return this.build(ownerName, repoName, slug, latest.sha, key, useModel, owner, signal, token, progress);
   }
 
-  private async build(ownerName: string, repoName: string, slug: string, sha: string, key: string, useModel: boolean, owner: string | undefined, signal: AbortSignal, token?: string): Promise<Result> {
+  private async build(ownerName: string, repoName: string, slug: string, sha: string, key: string, useModel: boolean, owner: string | undefined, signal: AbortSignal, token?: string, progress?: Progress): Promise<Result> {
+    progress?.('download');
     const zip = await this.github.download(ownerName, repoName, sha, signal, token);
     // One pass over the table of contents decides which files are scanned and counts what is left out, before anything is unpacked.
     const skipped: Record<string, number> = {};
@@ -91,13 +94,16 @@ export class RepoScanService {
       const label = maskName(path.replace(/[^\x20-\x7e]/g, '_')).slice(-150);
       return { name: path, buffer: entry.data, fromArchive: true, label };
     });
-    const result = (await this.scans.scanFiles(files, useModel, owner, signal, { prepared: true, label: token ? 'GitHub: private repository' : `GitHub: ${slug}`, persist: !token })) as Result;
+    const result = (await this.scans.scanFiles(files, useModel, owner, signal, { prepared: true, label: token ? 'GitHub: private repository' : `GitHub: ${slug}`, persist: !token, progress })) as Result;
     const cleaned = { ...result, repo: { owner: ownerName, repo: repoName, sha, files: files.length, skipped: { ...skipped, ...read.skipped }, note: read.skipped['over the file limit'] || read.skipped['over the total size limit'] ? `${REPO_NOTE} ${limitNote(token)}` : REPO_NOTE } };
     if (token) {
       // The token is never in a result. If it ever were, the scan fails closed.
       if (JSON.stringify(cleaned).includes(token)) throw new InternalServerErrorException('Response blocked: it would have contained a token.');
       return cleaned;
     }
+    // A result where the AI failed, timed out or hit a limit is not saved, so the next visitor gets a fresh try.
+    const findings = (result.findings ?? []) as Array<{ judge?: { status?: string } }>;
+    if (findings.some((finding) => ['error', 'timeout', 'limit'].includes(finding.judge?.status ?? ''))) return cleaned;
     const commit = await this.github.commitInfo(ownerName, repoName, sha, signal);
     await this.cache.set(key, slug, sha, cleaned, commit);
     return cleaned;

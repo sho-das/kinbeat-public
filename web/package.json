@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -H 127.0.0.1 -p 3001",
+    "dev": "node scripts/cert.mjs && next dev -H 127.0.0.1 -p 3001 --experimental-https --experimental-https-key certificates/localhost-key.pem --experimental-https-cert certificates/localhost.pem",
     "build": "next build",
-    "start": "next start -H 127.0.0.1 -p 3001"
+    "start": "next start -H 127.0.0.1 -p 3001",
+    "test": "node --test --no-warnings app/lib/*.test.mjs"
   },
   "dependencies": {
     "next": "^16.0.0",

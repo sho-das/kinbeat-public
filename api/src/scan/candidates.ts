@@ -100,6 +100,7 @@ function findIn(text: string): Candidate[] {
       spans: [{ start: match.start, end: match.end }],
       encoding: 'plain',
       score: match.score,
+      ...(match.weak ? { weak: true } : {}),
     });
   }
 
@@ -111,6 +112,7 @@ function findIn(text: string): Candidate[] {
         spans: [{ start: chunk.start, end: chunk.end }],
         encoding: chunk.encoding,
         score: match.score - 0.05,
+        ...(match.weak ? { weak: true } : {}),
       });
     }
   }
@@ -150,7 +152,7 @@ function findIn(text: string): Candidate[] {
         );
         if (!partial) continue;
         for (const index of overlapping.reverse()) found.splice(index, 1);
-        add({ type: match.type, value: match.value, spans, encoding: 'stitched', score: match.score - 0.1 });
+        add({ type: match.type, value: match.value, spans, encoding: 'stitched', score: match.score - 0.1, ...(match.weak ? { weak: true } : {}) });
       }
     }
   }
@@ -158,6 +160,10 @@ function findIn(text: string): Candidate[] {
   // A value spoken in words ("foxtrot six echo ...") has its own first word found as a plain value.
   // That word is part of the spoken secret, so it is not a finding of its own.
   const spoken = found.filter((candidate) => candidate.encoding === 'spelled').map((candidate) => candidate.spans[0]);
-  const kept = found.filter((candidate) => candidate.encoding !== 'plain' || !spoken.some((span) => candidate.spans[0].start >= span.start && candidate.spans[0].end <= span.end));
+  // In the same way, encoded text (reversed, base64, hex) can look like a random password on its own.
+  // When that text decodes to a known kind of secret, it is one secret, so the plain look-alike is dropped.
+  const decoded = found.filter((candidate) => candidate.encoding !== 'plain' && candidate.encoding !== 'stitched').map((candidate) => candidate.spans[0]);
+  const inside = (candidate: Candidate, spans: Span[]) => spans.some((span) => candidate.spans[0].start >= span.start && candidate.spans[0].end <= span.end);
+  const kept = found.filter((candidate) => candidate.encoding !== 'plain' || (!inside(candidate, spoken) && !(candidate.type === 'generic_secret' && inside(candidate, decoded))));
   return kept.sort((a, b) => a.spans[0].start - b.spans[0].start);
 }

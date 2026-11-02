@@ -1,5 +1,3 @@
-import type { Finding } from "./scan";
-import { placeLabel, typeLabel } from "./scan";
 
 interface Guide {
   title: string;
@@ -72,20 +70,4 @@ const GUIDES: Record<string, Guide> = {
 
 export function guideFor(type: string): Guide {
   return GUIDES[type] ?? GUIDES.generic_secret;
-}
-
-export function ownerMessage(finding: Finding, scanLabel?: string): string {
-  const where = scanLabel ? `${placeLabel(finding.place)} (${scanLabel})` : placeLabel(finding.place);
-  const guide = guideFor(finding.type);
-  return [
-    "Hi,",
-    "",
-    `A scan found a secret that looks like it is exposed: ${typeLabel(finding).toLowerCase()}, shown as ${finding.preview}.`,
-    `Where: ${where}.`,
-    "",
-    "Please do these steps today:",
-    ...guide.steps.map((s, i) => `${i + 1}. ${s}`),
-    "",
-    "Reply when it is done so we can close the case.",
-  ].join("\n");
 }

@@ -7,6 +7,7 @@ interface Rule {
   groups?: number[];
   score: (value: string) => number;
   accept?: (value: string, match: RegExpMatchArray) => boolean;
+  weak?: boolean;
 }
 
 const fixed = (score: number) => () => score;
@@ -99,6 +100,11 @@ const entropy = (value: string): number => {
   return bits;
 };
 
+// A version number such as 4.5.7, v1.2.3-beta.1 or kustomize/v4.5.7. It names a release and holds no secret.
+const VERSION = /^(?:[a-z0-9-]+\/)?v?\d+(?:\.\d+)+(?:[-+][A-Za-z0-9.]+)?$/i;
+// A word that names a password. A value after it is kept even when it looks like a version, since a person may choose 10.4.12.
+const PASSWORD_NAME = /^(?:password|passwd|passcode|pwd)/i;
+
 const NOT_RANDOM = [
   /^[0-9a-f]{32}$|^[0-9a-f]{40}$|^[0-9a-f]{64}$|^[0-9a-f]{128}$/i,
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
@@ -108,7 +114,9 @@ const NOT_RANDOM = [
   /\.[A-Za-z]{2,5}$/,
   /%[0-9A-Fa-f]{2}/,
   /^[A-Za-z]{2,5}-\d{2,}(?:-\d+)*$/,
-  /^\d+(?:\.\d+)+(?:-[A-Za-z0-9.]+)?$/,
+  VERSION,
+  // A Kubernetes API version such as external-secrets.io/v1beta1 or apps/v1.
+  /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\/v\d+(?:(?:alpha|beta)\d+)?$/,
 ];
 const readableBase64 = (value: string): boolean => {
   if (value.length < 16 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
@@ -118,6 +126,10 @@ const readableBase64 = (value: string): boolean => {
 const randomLooking = (value: string): boolean =>
   value.length >= 12 && /\p{L}/u.test(value) && /\d/.test(value) && entropy(value) >= 3.3 && !readableBase64(value) && !NOT_RANDOM.some((pattern) => pattern.test(value));
 
+// Style class names such as hover:bg-red-500/20 or data-active:after:opacity-100: a chain of plain words and small numbers,
+// often with more colons inside. A random token has segments that mix letters and digits, so it does not match.
+const STYLE_SEGMENT = '-?(?:[a-z]+|\\d{1,4}(?:\\.\\d)?|\\[[^\\]\\s]{1,30}\\])';
+const STYLE_CHAIN = new RegExp(`^${STYLE_SEGMENT}(?:[-:/]${STYLE_SEGMENT})*$`);
 const FILLER = /^(?:no|yes|na|n\/a|tbd|ok|nil|nan|none|null)$/i;
 const WHOLE = '(?:(?!&[A-Za-z0-9_]+=|[,;.]+(?:\\s|$))[^\\s"\']){6,200}';
 
@@ -152,7 +164,7 @@ const RULES: Rule[] = [
     pattern: new RegExp(`(?:password|passwd|passcode|pwd|secret|api[_ -]?key|token|recovery[_ -]?code)[A-Za-z0-9_-]{0,40}(?:[ \\t]*(?::=|[:=])[ \\t]*|[ \\t]+is[ \\t]+(?=\\S*\\d))(?:"([^"\\n]{6,200})"|'([^'\\n]{6,200})'|(${WHOLE}))`, 'dgi'),
     groups: [1, 2, 3],
     score: genericScore,
-    accept: (value, match) => real(value, isQuoted(match)),
+    accept: (value, match) => real(value, isQuoted(match)) && (!VERSION.test(value) || PASSWORD_NAME.test(match[0])),
   },
   {
     type: 'generic_secret',
@@ -192,10 +204,21 @@ const RULES: Rule[] = [
   {
     type: 'generic_secret',
     // A label right after a quote or a colon is a piece of a text such as "user:1234:profile" or an arn, not a label.
-    pattern: /(?<!\]\s)(?<![\p{L}\p{M}\p{N}_"':-])\p{L}[\p{L}\p{M}\p{N}_-]{1,30}[ \t]*[:=\uff1a][ \t]*([^\s"'<>(){}\[\],;&]{10,128})/dgu,
+    // A value in backticks is read without them, so `report-2026.csv` is seen as a file name.
+    pattern: /(?<!\]\s)(?<![\p{L}\p{M}\p{N}_"':-])\p{L}[\p{L}\p{M}\p{N}_-]{1,30}[ \t]*[:=\uff1a][ \t]*`?([^\s"'`<>(){}\[\],;&]{10,128})/dgu,
     group: 1,
     score: () => 0.55,
-    accept: (value) => real(value) && randomLooking(value) && !looksLikeCode(value),
+    accept: (value) => real(value) && randomLooking(value) && !looksLikeCode(value) && !STYLE_CHAIN.test(value),
+    weak: true,
+  },
+  {
+    // A value inside an XML element named like a secret, such as <password>...</password> in a Maven settings.xml.
+    // The whole element name must be the secret word (dotted names such as gpg.passphrase count), so <ClientSecretId> does not.
+    type: 'generic_secret',
+    pattern: /<((?:[\w-]+\.)*(?:password|passphrase|passwd|secret|token|api[_-]?key|master))>([^<\s]{6,200})<\/\1>/dgi,
+    group: 2,
+    score: () => 0.75,
+    accept: (value) => !/\$\{|\$\(|#\{|@@/.test(value) && !/^(?:true|false|yes|no|null)$/i.test(value) && (/^\{[A-Za-z0-9+\/]{20,}={0,2}\}$/.test(value) || (!value.startsWith('{') && real(value, true))),
   },
   // Fixed shapes: the form of the value alone says it is a credential.
   { type: 'api_key', pattern: /\bSK[0-9a-f]{32}\b/d, score: fixed(0.9) },
@@ -321,6 +344,93 @@ function tableSecrets(text: string): RawMatch[] {
   return found;
 }
 
+// A Kubernetes Secret (kind: Secret) keeps its values under data: (base64) or stringData: (plain text).
+// The file says these are secrets, so each value is a finding even when it does not look random.
+// Read line by line, one document (between --- lines) at a time, so a big file stays one pass.
+const K8S_KIND = /^[ \t]*(?:-[ \t]+)?kind:[ \t]*["']?Secret["']?[ \t]*(?:#.*)?$/im;
+const K8S_API = /^[ \t]*(?:-[ \t]+)?apiVersion:[ \t]*["']?v1["']?[ \t]*(?:#.*)?$/m;
+const K8S_FIELD = /^([ \t]*(?:-[ \t]+)?)(data|stringData):[ \t]*(?:#.*)?$/;
+const K8S_KEY = /^([ \t]+)([\w.-]+):[ \t]*(.*?)[ \t]*$/;
+const K8S_SECRET_KEY = /pass|secret|token|key|cred|auth|private|htpasswd|docker(?:cfg|configjson)|\.env$/i;
+const K8S_PUBLIC_KEY = /(?:^|\.)(?:crt|pem|cert|namespace)$|^ca\b/i;
+const K8S_MAX_BLOCK_LINES = 200;
+const K8S_MAX_VALUE = 8_000;
+
+function kubernetesSecrets(text: string): RawMatch[] {
+  if (!K8S_KIND.test(text)) return [];
+  const found: RawMatch[] = [];
+  const lines: Array<{ text: string; offset: number }> = [];
+  for (let offset = 0; offset <= text.length; ) {
+    const end = text.indexOf('\n', offset);
+    const stop = end < 0 ? text.length : end;
+    lines.push({ text: text.slice(offset, stop).replace(/\r$/, ''), offset });
+    offset = stop + 1;
+  }
+  const indent = (line: string) => line.length - line.trimStart().length;
+  const keyColumn = (line: string) => line.match(/^[ \t]*(?:-[ \t]+)?/)![0].length;
+  let first = 0;
+  for (let last = 0; last <= lines.length; last++) {
+    if (last < lines.length && !/^---[ \t]*$/.test(lines[last].text)) continue;
+    const doc = lines.slice(first, last);
+    first = last + 1;
+    const docText = doc.map((line) => line.text).join('\n');
+    if (!K8S_KIND.test(docText) || !K8S_API.test(docText)) continue;
+    const kindLine = doc.find((line) => K8S_KIND.test(line.text))!;
+    for (let row = 0; row < doc.length; row++) {
+      const field = K8S_FIELD.exec(doc[row].text);
+      // Only data: and stringData: that sit beside kind: count, never a nested field of the same name.
+      if (!field || field[1].length !== keyColumn(kindLine.text)) continue;
+      const decode = field[2] === 'data';
+      const fieldIndent = field[1].length;
+      for (let child = row + 1; child < doc.length; child++) {
+        const line = doc[child];
+        if (line.text.trim() === '' || line.text.trim().startsWith('#')) continue;
+        if (indent(line.text) <= fieldIndent) break;
+        const key = K8S_KEY.exec(line.text);
+        if (!key) continue;
+        let value = key[3].replace(/[ \t]+#.*$/, '');
+        let start = line.offset + line.text.indexOf(value, key[1].length + key[2].length + 1);
+        let end = start + value.length;
+        if (/^[|>][+-]?$/.test(value)) {
+          // A block value: the indented lines below the key.
+          const body: Array<{ text: string; offset: number }> = [];
+          for (let next = child + 1; next < doc.length && body.length < K8S_MAX_BLOCK_LINES; next++) {
+            if (doc[next].text.trim() !== '' && indent(doc[next].text) <= indent(line.text)) break;
+            if (doc[next].text.trim() !== '') body.push(doc[next]);
+          }
+          if (!body.length) continue;
+          child += body.length;
+          // A block of NAME=value lines is a settings file; the other rules read each of its lines. Base64 padding (==) is not a NAME=value.
+          if (body.every((part) => /^[ \t]*[A-Za-z_][\w.-]{0,40}[ \t]*=[ \t]*[^=\s]/.test(part.text))) continue;
+          const head = body[0];
+          const tail = body[body.length - 1];
+          start = head.offset + indent(head.text);
+          end = tail.offset + tail.text.length;
+          value = text.slice(start, end);
+        } else {
+          const quoted = /^(["'])(.*)\1$/.exec(value);
+          if (quoted) {
+            value = quoted[2];
+            start += 1;
+            end -= 1;
+          }
+        }
+        if (value.length < 4 || value.length > K8S_MAX_VALUE || K8S_PUBLIC_KEY.test(key[2]) || /\{\{|\$\{/.test(value)) continue;
+        // A data: value must really be base64; text such as <base64-encoded-token> is a placeholder, not a secret.
+        if (decode && !/^[A-Za-z0-9+/\s]+={0,2}$/.test(value)) continue;
+        const plain = decode ? Buffer.from(value.replace(/\s+/g, ''), 'base64').toString('utf8') : value;
+        if (/BEGIN CERTIFICATE/.test(plain) || plain.trim().length < 8 || !real(plain.trim(), true)) continue;
+        // Secrets also hold plain settings such as url, type or project. Only a key named like a secret, a random-looking value
+        // or a private key counts, and a link with no password in it never does.
+        const settingLink = /^[a-z][a-z0-9+.-]*:\/\/[^\s@]*$/i.test(plain.trim());
+        if (settingLink || !(K8S_SECRET_KEY.test(key[2]) || randomLooking(plain.trim()) || /PRIVATE KEY/.test(plain))) continue;
+        found.push({ type: /PRIVATE KEY/.test(plain) ? 'private_key' : 'generic_secret', value, start, end, score: 0.8 });
+      }
+    }
+  }
+  return found;
+}
+
 export function detect(text: string): RawMatch[] {
   const found: RawMatch[] = [];
   const seen = new Set<string>();
@@ -340,10 +450,11 @@ export function detect(text: string): RawMatch[] {
         start: indices[0],
         end: indices[1],
         score: rule.score(value),
+        ...(rule.weak ? { weak: true } : {}),
       });
     }
   }
-  for (const match of tableSecrets(text)) {
+  for (const match of [...tableSecrets(text), ...kubernetesSecrets(text)]) {
     const key = `${match.start}:${match.value}`;
     if (seen.has(key)) continue;
     seen.add(key);

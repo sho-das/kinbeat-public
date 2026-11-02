@@ -45,6 +45,9 @@ const LONG_RUN = 12;
 const SHORT_RUN = 4;
 const MAX_GAP_MINUTES = 180;
 const BASE64 = /(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{16,}={0,2}(?![A-Za-z0-9+/])/g;
+// A private key that was base64 encoded and wrapped over many lines, as the base64 command does by default.
+// Only runs that start like an encoded key header are joined, at most 200 lines, so ordinary base64 stays one line at a time.
+const WRAPPED_KEY = /(?<![A-Za-z0-9+/])(?:LS0tLS1CRUdJTi|b3BlbnNzaC1rZXktdjE)[A-Za-z0-9+/]*(?:\r?\n[A-Za-z0-9+/]+){1,200}={0,2}/g;
 const HEX = /(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}){10,}(?![0-9A-Fa-f])/g;
 const URL_ENCODED = /\S+/g;
 const HAS_PERCENT_CODE = /%[0-9A-Fa-f]{2}/;
@@ -68,7 +71,9 @@ function collect(text: string, pattern: RegExp, encoding: Encoding, decode: (raw
 }
 
 export function decodeBase64(text: string): Chunk[] {
-  return collect(text, BASE64, 'base64', (raw) => Buffer.from(raw, 'base64').toString('utf8'));
+  const decode = (raw: string) => Buffer.from(raw, 'base64').toString('utf8');
+  const wrapped = collect(text, WRAPPED_KEY, 'base64', (raw) => (raw.includes('\n') && /PRIVATE KEY/.test(decode(raw)) ? decode(raw) : null));
+  return [...collect(text, BASE64, 'base64', decode), ...wrapped];
 }
 
 export function decodeHex(text: string): Chunk[] {

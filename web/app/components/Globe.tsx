@@ -5,12 +5,15 @@ import { RINGS } from "./map-rings";
 
 type Vec = [number, number, number];
 
-const ORANGE = "242,101,34";
-const NAVY = "31,59,96";
-const INK = "#0A0A0A";
+const ORANGE = "232,98,44";
+// The page is dark: the sea, grid and labels are drawn in light paper colour.
+const NAVY = "246,241,231";
+const INK = "#F6F1E7";
 const FADE_IN_MS = 1600;
 const FLIGHT_MS = 3800;
-const MAX_FLIGHTS = 16;
+const MAX_FLIGHTS = 28;
+// Phones show only this many keys and tokens at once, so the small globe does not look crowded.
+const MAX_FLIGHTS_PHONE = 3;
 // The earth makes one turn in this time. START_LON is the longitude in the middle at the start; TILT leans the north towards the viewer (radians).
 const TURN_MS = 90000;
 const START_LON = 45;
@@ -61,9 +64,39 @@ const CITIES: Array<{ name: string; lon: number; lat: number }> = [
   { name: "SINGAPORE", lon: 103.8, lat: 1.35 },
   { name: "JAKARTA", lon: 106.85, lat: -6.2 },
   { name: "SYDNEY", lon: 151.2, lat: -33.87 },
+  // Extra cities in the USA, China, Europe and India, so more flights start and land there.
+  { name: "SAN FRANCISCO", lon: -122.42, lat: 37.77 },
+  { name: "SEATTLE", lon: -122.33, lat: 47.61 },
+  { name: "CHICAGO", lon: -87.63, lat: 41.88 },
+  { name: "WASHINGTON", lon: -77.04, lat: 38.91 },
+  { name: "BOSTON", lon: -71.06, lat: 42.36 },
+  { name: "AUSTIN", lon: -97.74, lat: 30.27 },
+  { name: "ATLANTA", lon: -84.39, lat: 33.75 },
+  { name: "MIAMI", lon: -80.19, lat: 25.76 },
+  { name: "SHANGHAI", lon: 121.47, lat: 31.23 },
+  { name: "SHENZHEN", lon: 114.06, lat: 22.54 },
+  { name: "HONG KONG", lon: 114.17, lat: 22.32 },
+  { name: "GUANGZHOU", lon: 113.26, lat: 23.13 },
+  { name: "HANGZHOU", lon: 120.16, lat: 30.27 },
+  { name: "CHENGDU", lon: 104.07, lat: 30.57 },
+  { name: "WUHAN", lon: 114.31, lat: 30.59 },
+  { name: "FRANKFURT", lon: 8.68, lat: 50.11 },
+  { name: "MUNICH", lon: 11.58, lat: 48.14 },
+  { name: "ZURICH", lon: 8.54, lat: 47.37 },
+  { name: "MILAN", lon: 9.19, lat: 45.46 },
+  { name: "BARCELONA", lon: 2.17, lat: 41.39 },
+  { name: "BRUSSELS", lon: 4.35, lat: 50.85 },
+  { name: "PRAGUE", lon: 14.44, lat: 50.08 },
+  { name: "COPENHAGEN", lon: 12.57, lat: 55.68 },
+  { name: "MANCHESTER", lon: -2.24, lat: 53.48 },
+  { name: "HYDERABAD", lon: 78.49, lat: 17.39 },
+  { name: "CHENNAI", lon: 80.27, lat: 13.08 },
+  { name: "PUNE", lon: 73.86, lat: 18.52 },
+  { name: "KOLKATA", lon: 88.36, lat: 22.57 },
+  { name: "AHMEDABAD", lon: 72.57, lat: 23.02 },
+  { name: "JAIPUR", lon: 75.79, lat: 26.91 },
 ];
 
-const ease = (t: number) => 1 - Math.pow(1 - t, 3);
 const rad = (deg: number) => (deg * Math.PI) / 180;
 const dot = (a: Vec, b: Vec) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
@@ -73,11 +106,6 @@ function unit(lon: number, lat: number): Vec {
   return [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)];
 }
 
-const cross = (a: Vec, b: Vec): Vec => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-const norm = (a: Vec): Vec => {
-  const n = Math.hypot(a[0], a[1], a[2]) || 1;
-  return [a[0] / n, a[1] / n, a[2] / n];
-};
 
 // Turns a point on the earth into screen units (x right, y up, z towards the viewer). The earth turns on its own
 // north-south axis, west to east, like a real globe. The north leans a little towards the viewer.
@@ -151,6 +179,8 @@ export function Globe() {
     if (!el || !cv || !g) return;
 
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Phones (860px or less, as in globals.css).
+    const phone = () => window.innerWidth <= 860;
     const rings = RINGS.map((flat) => {
       const out: Vec[] = [];
       for (let i = 0; i < flat.length; i += 2) out.push(unit(flat[i] / 10, flat[i + 1] / 10));
@@ -183,15 +213,14 @@ export function Globe() {
     };
 
     const draw = (now: number) => {
-      const wide = width >= 900;
-      const radius = wide ? Math.min(width * 0.36, height * 0.8) : Math.min(width * 0.5, height * 0.45);
-      const cx = wide ? width * 0.7 : width * 0.5;
-      const cy = wide ? height * 0.52 : height * 0.8;
+      // Phones: the globe sits to the right, above the headline, and does not turn.
+      const wide = !phone();
+      const radius = wide ? Math.min(width * 0.36, height * 0.8) : Math.min(width, height) * 0.46;
+      const cx = wide ? width * 0.7 : width * 0.6;
+      const cy = wide ? height * 0.52 : height * 0.5;
       const strength = wide ? 1 : 0.55;
-      const fade = still ? 1 : ease(Math.min(1, (now - begun) / FADE_IN_MS));
       const at = (p: Vec): [number, number] => [cx + p[0] * radius, cy - p[1] * radius];
       g.clearRect(0, 0, width, height);
-      g.globalAlpha = fade;
 
       // The sea: a soft disc with a thin edge.
       const sea = g.createRadialGradient(cx, cy, radius * 0.5, cx, cy, radius);
@@ -201,7 +230,7 @@ export function Globe() {
       g.beginPath();
       g.arc(cx, cy, radius, 0, Math.PI * 2);
       g.fill();
-      g.strokeStyle = `rgba(10,10,10,${0.18 * strength})`;
+      g.strokeStyle = `rgba(${NAVY},${0.18 * strength})`;
       g.lineWidth = 1;
       g.stroke();
 
@@ -316,7 +345,11 @@ export function Globe() {
 
     // A new flight between two cities that are on the front of the globe right now.
     const newFlight = (now: number) => {
-      const shown = spots.map((_, i) => i).filter((i) => view(spots[i], spin)[2] > 0.25);
+      // On phones only cities on the top half of the globe, so flights stay above the headline.
+      const shown = spots.map((_, i) => i).filter((i) => {
+        const p = view(spots[i], spin);
+        return p[2] > 0.25 && (!phone() || p[1] > 0.15);
+      });
       if (shown.length < 2) return;
       const from = shown[Math.floor(Math.random() * shown.length)];
       const near = shown.filter((i) => i !== from && dot(spots[from], spots[i]) < 0.995 && dot(spots[from], spots[i]) > 0.1);
@@ -328,10 +361,10 @@ export function Globe() {
       frame = requestAnimationFrame(tick);
       if (!visible || document.hidden) return;
       const t = now - begun - FADE_IN_MS;
-      spin = t > 0 ? (2 * Math.PI * t) / TURN_MS : 0;
+      spin = t > 0 && !phone() ? (2 * Math.PI * t) / TURN_MS : 0;
       if (t > 0) {
         flights = flights.filter((f) => now - f.born < FLIGHT_MS);
-        if (flights.length < MAX_FLIGHTS && Math.random() < 0.1) newFlight(now);
+        if (flights.length < (phone() ? MAX_FLIGHTS_PHONE : MAX_FLIGHTS) && Math.random() < 0.15) newFlight(now);
       }
       draw(now);
     };

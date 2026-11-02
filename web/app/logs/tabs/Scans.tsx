@@ -152,7 +152,7 @@ function FragmentRow({ row, open, onToggle }: { row: ScanRow; open: ScanDetail |
             <div className="findings">
               {open.result.findings.length === 0 && <p className="empty">No findings in this scan.</p>}
               {open.result.findings.map((f, i) => (
-                <FindingCard key={f.id} finding={f} index={i} scanId={open.id} scanLabel={open.label} />
+                <FindingCard key={f.id} finding={f} index={i} />
               ))}
             </div>
           </td>

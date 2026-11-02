@@ -1,10 +1,10 @@
 import { content as C } from "./content";
-import { Demo } from "./components/Demo";
 import { Footer } from "./components/Footer";
 import { Nav } from "./components/Nav";
 import { Scanner } from "./components/Scanner";
 import { Settle } from "./components/Settle";
 import { Globe } from "./components/Globe";
+import { Leak } from "./components/Leak";
 
 const jsonLd = [
   {
@@ -29,7 +29,7 @@ const jsonLd = [
 
 export default function Home() {
   return (
-    <>
+    <div className="night">
       <Settle />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <Nav />
@@ -43,21 +43,28 @@ export default function Home() {
               <span className="w w2">
                 {C.headline[1]}
               </span>
-              <span className="w w3 o">
-                <span>
-                  {C.headline[2].split(/(hackers)/i).map((part, i) =>
-                    /^hackers$/i.test(part) ? (
-                      <mark key={i} className="hl red">
-                        {part}
-                      </mark>
-                    ) : (
-                      part
-                    ),
-                  )}
-                </span>
+              <span className="w w3">
+                {C.headline[2].split(/(hackers do\.?)/i).map((part, i) =>
+                  /^hackers do/i.test(part) ? (
+                    <em key={i} className="glow">
+                      {part}
+                      <svg viewBox="0 0 300 24" preserveAspectRatio="none" aria-hidden="true">
+                        <path pathLength={1} d="M3 15 C 60 4, 120 22, 180 9 S 270 6, 297 14" />
+                      </svg>
+                    </em>
+                  ) : (
+                    part
+                  ),
+                )}
               </span>
             </h1>
             <p className="lede">{C.lead}</p>
+            <p className="lede-source">
+              Source:{" "}
+              <a href={C.leadSource.url} target="_blank" rel="noopener noreferrer">
+                {C.leadSource.name}
+              </a>
+            </p>
             <div className="cta">
               <a className="btn" href="#scan">
                 {C.cta.primary}
@@ -69,10 +76,28 @@ export default function Home() {
           </div>
         </header>
 
-        <section className="band light story" id="how" aria-labelledby="story-h">
+        <section className="proof" aria-label="Leaks in numbers">
+          <div className="wrap proof__grid">
+            {C.proof.map((p) => (
+              <div key={p.figure} className="proof__item">
+                <b>{p.figure}</b>
+                <span>{p.text}</span>
+                <small>
+                  <a href={p.url} target="_blank" rel="noopener noreferrer">
+                    {p.source}
+                  </a>
+                </small>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="section leak-section" id="how" aria-labelledby="leak-h">
           <div className="wrap">
-            <h2 id="story-h">{C.demo.title}</h2>
-            <Demo />
+            <h2 className="big" id="leak-h">
+              {C.leak.title}
+            </h2>
+            <Leak />
           </div>
         </section>
 
@@ -104,9 +129,19 @@ export default function Home() {
           </div>
         </section>
 
+        <section className="closing" aria-labelledby="closing-h">
+          <div className="wrap">
+            <h2 className="closing__big" id="closing-h">
+              {C.closing.split(/(hackers do\.?)/i).map((part, i) => (/^hackers do/i.test(part) ? <em key={i}>{part}</em> : part))}
+            </h2>
+            <a className="btn" href="#scan">
+              {C.cta.primary}
+            </a>
+          </div>
+        </section>
       </main>
 
       <Footer />
-    </>
+    </div>
   );
 }

@@ -38,7 +38,7 @@ export class AuthService implements OnModuleInit {
   }
 
   publicUrl(): string {
-    return (process.env.WEB_PUBLIC_URL || 'http://localhost:3001').replace(/\/+$/, '');
+    return (process.env.WEB_PUBLIC_URL || 'https://localhost:3001').replace(/\/+$/, '');
   }
 
   async requestLogin(rawEmail: unknown, ip: string): Promise<{ bind: string }> {

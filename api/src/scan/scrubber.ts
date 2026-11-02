@@ -1,4 +1,5 @@
 import { findCandidates } from './candidates';
+import { sentence } from './reasons';
 import { Candidate } from './types';
 
 export const SLICE_LIMIT = 400;
@@ -6,7 +7,7 @@ export const SLICE_WIDTHS = [SLICE_LIMIT, 800];
 const MIN_FORBIDDEN_LENGTH = 4;
 
 // The one sentence a visitor sees when the safety check stops a finding from going to the AI.
-export const BLOCKED_REASON = 'We could not be sure the secret was fully hidden. Treat it as a real secret.';
+const BLOCKED_REASON = 'We could not be sure the secret was fully hidden. Treat it as a real secret.';
 
 export type ScrubResult = { ok: true; slice: string } | { ok: false; error: string };
 
@@ -21,7 +22,12 @@ export function forbiddenStrings(text: string, candidates: Candidate[]): string[
     forbidden.add(Buffer.from(candidate.value).toString('base64'));
     forbidden.add(Buffer.from(candidate.value).toString('hex'));
     forbidden.add(encodeURIComponent(candidate.value));
-    for (const span of candidate.spans) forbidden.add(text.slice(span.start, span.end));
+    for (const span of candidate.spans) {
+      const raw = text.slice(span.start, span.end);
+      forbidden.add(raw);
+      // A value written over several lines is also forbidden line by line, so one line of it can never be shown alone.
+      if (raw.includes('\n')) for (const line of raw.split('\n')) forbidden.add(line.trim());
+    }
   }
   return [...forbidden].filter((item) => item.length >= MIN_FORBIDDEN_LENGTH);
 }
@@ -43,7 +49,7 @@ export interface FindingParts {
   judge?: object | null;
 }
 
-// The fields of one finding that can carry text from the user's input. The model's own reason and fixed server text are not searched.
+// The fields of one finding that can carry text from the user's input. The reason is always one of our fixed sentences, so it is not searched.
 function visibleText(finding: FindingParts | null | undefined): string {
   const place = finding?.place as { file?: unknown } | null | undefined;
   const judge = finding?.judge as { slice?: unknown; facts?: unknown } | null | undefined;
@@ -70,7 +76,7 @@ export function withhold<T extends { place?: object | null; line?: unknown }>(fi
     // The line stays when it holds no copy of the value, so the visitor can still see where it sits.
     line: finding.line && findingLeak({ line: finding.line }, forbidden) === null ? finding.line : undefined,
     place,
-    judge: { status: 'blocked', error: 'Hidden for safety: its value also appears in text we would return.' },
+    judge: { status: 'blocked', code: 'LEAK_GUARD', reason: sentence('LEAK_GUARD') },
   } as unknown as T;
 }
 
@@ -216,4 +222,46 @@ export function buildSlice(text: string, target: Candidate, all: Candidate[], wi
     return { ok: false, error: BLOCKED_REASON };
   }
   return { ok: true, slice };
+}
+
+// The marks around the one copy the AI judges. Any such sign already in the file becomes a plain bracket first,
+// so text in the file cannot move the mark to another copy.
+const MARK_OPEN = '⟪';
+const MARK_CLOSE = '⟫';
+const PEM_LINES = /^(-----BEGIN [^\n]*-----)[\s\S]*?(-----END [^\n]*-----)$/;
+
+// The text around one finding exactly as written, for our own AI server only, which keeps no copy. Nothing is masked
+// and nothing is blocked; only the copy to judge is marked. A private key keeps its BEGIN and END lines, with ... between.
+// The words around the copy are cut at a space, up to half the width on each side; the marked copy is never cut.
+export function buildRawSlice(text: string, target: Candidate, width = SLICE_LIMIT): string {
+  const clean = text.replaceAll(MARK_OPEN, '[').replaceAll(MARK_CLOSE, ']');
+  // A span may cover more than the value, so a passphrase is fully masked elsewhere. The mark goes around the value only,
+  // when the value is written as it is inside one span; an encoded or split value keeps its spans.
+  const plain = target.spans.length === 1 ? clean.indexOf(target.value, target.spans[0].start) : -1;
+  const spans =
+    plain >= 0 && plain + target.value.length <= target.spans[0].end
+      ? [{ start: plain, end: plain + target.value.length }]
+      : [...target.spans].sort((a, b) => a.start - b.start);
+  const start = spans[0].start;
+  const end = spans[spans.length - 1].end;
+  const half = Math.floor(width / 2);
+  let from = Math.max(0, start - half);
+  let to = Math.min(clean.length, end + half);
+  if (from > 0 && !/\s/.test(clean[from - 1])) {
+    const gap = clean.slice(from, start).search(/\s/);
+    if (gap >= 0) from += gap + 1;
+  }
+  if (to < clean.length && !/\s/.test(clean[to])) {
+    const gap = clean.slice(end, to).search(/\s[^\s]*$/);
+    if (gap >= 0) to = end + gap;
+  }
+  if (from > 0 && isLow(clean.charCodeAt(from))) from++;
+  if (to < clean.length && isHigh(clean.charCodeAt(to - 1))) to--;
+  const shown = (piece: string) => (target.type === 'private_key' ? piece.replace(PEM_LINES, '$1\n...\n$2') : piece);
+  let out = clean.slice(from, start);
+  spans.forEach((span, i) => {
+    out += MARK_OPEN + shown(clean.slice(span.start, span.end)) + MARK_CLOSE;
+    out += clean.slice(span.end, i + 1 < spans.length ? spans[i + 1].start : to);
+  });
+  return out;
 }
