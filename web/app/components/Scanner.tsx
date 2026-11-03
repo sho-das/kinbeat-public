@@ -93,6 +93,8 @@ export function Scanner() {
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The visitor pressed Cancel: the results side says so until the next scan or tab.
+  const [cancelled, setCancelled] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [group, setGroup] = useState<Group | null>(null);
   const [source, setSource] = useState("");
@@ -161,6 +163,7 @@ export function Scanner() {
 
   function changeMode(next: Mode) {
     setMode(next);
+    setCancelled(false);
     setToken("");
     clearDrive();
     // A new tab starts empty, so it never shows the result of a scan made in another tab.
@@ -205,6 +208,7 @@ export function Scanner() {
   function cancelScan() {
     if (serverJob.current) fetch(`/api/scan/repo/history/${serverJob.current}`, { method: "DELETE", cache: "no-store" }).catch(() => {});
     stop.current?.abort();
+    setCancelled(true);
   }
 
   // Runs after each scan ends. A chosen tab is switched to only now, when the scan's own clean-up is done.
@@ -246,6 +250,7 @@ export function Scanner() {
 
   async function runJob(url: string, body: Record<string, unknown>, label: string, labelOf?: (result: unknown) => string) {
     setError("");
+    setCancelled(false);
     setResult(null);
     setGroup(null);
     setBusy(true);
@@ -323,6 +328,7 @@ export function Scanner() {
       return;
     }
     setError("");
+    setCancelled(false);
     // The old result goes the moment a new scan starts, so a failed scan never shows the one before it.
     setResult(null);
     setGroup(null);
@@ -809,7 +815,8 @@ export function Scanner() {
         <h3 className="ph">{R.title}</h3>
         <div aria-live="polite" aria-atomic="false">
           {error && <p className="err">{error}</p>}
-          {!result && !error && !busy && (
+          {cancelled && !error && !busy && <p className="preview-title">{R.cancelled}</p>}
+          {!result && !error && !cancelled && !busy && (
             <div className="empty preview">
               <p className="preview-title">{R.empty}</p>
               <div className="findghost" aria-hidden="true">

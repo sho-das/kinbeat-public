@@ -44,12 +44,10 @@ export function FindingCard({ finding, index, repo }: { finding: Finding; index:
   const tag = kind === "timeout" || kind === "limit";
   return (
     <article className={`finding ${kind}`} style={{ animationDelay: `${index * 90}ms` }}>
-      {(finding.type !== "generic_secret" || tag) && (
-        <header>
-          {finding.type !== "generic_secret" && <h5>{typeLabel(finding)}</h5>}
-          {tag && <VerdictTag kind={kind} />}
-        </header>
-      )}
+      <header>
+        <h5>{typeLabel(finding)}</h5>
+        {tag && <VerdictTag kind={kind} />}
+      </header>
       <button type="button" className="linkbtn finding__toggle" aria-expanded={open} aria-label={open ? R.closeFinding : R.openFinding} onClick={() => setOpen(!open)}>
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
           <path d="M5 8l7 8 7-8" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />

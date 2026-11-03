@@ -66,9 +66,15 @@ export class ScanService {
     private readonly scanLog: ScanLog,
   ) {}
 
+  // Starts waking our own AI server while the scan reads its input, so the first AI call does not wait as long.
+  wakeModel(): void {
+    this.muse.wake().catch(() => {});
+  }
+
   // The recent-text memory in findCandidates only needs to live for one scan, so it is emptied when the scan ends.
   // With prepared set, the caller has already chosen and unpacked the files (a repository scan), so they are not checked again.
   async scanFiles(files: UploadedFile[], useModel: boolean, owner?: string, signal?: AbortSignal, options: { prepared?: boolean; label?: string; persist?: boolean; progress?: Progress; maxFindings?: number } = {}) {
+    if (useModel) this.wakeModel();
     try {
       return await this.runScanFiles(files, useModel, owner, signal, options);
     } finally {
@@ -282,7 +288,7 @@ export class ScanService {
         return;
       }
       const id = String(index);
-      items.push({ id, type: job.candidate.type, file: job.fileName, line: job.line, facts: buildFacts(job.text, job.candidate, job.fileName, job.all), value: ownValue(job.candidate, job.all), ...(job.candidate.weak ? { weak: true } : {}), slice: (width) => buildSlice(job.text, job.candidate, job.all, width), raw: (width) => buildRawSlice(job.text, job.candidate, width) });
+      items.push({ id, type: job.candidate.type, file: job.fileName, line: job.line, facts: buildFacts(job.fileName), value: ownValue(job.candidate, job.all), ...(job.candidate.weak ? { weak: true } : {}), slice: (width) => buildSlice(job.text, job.candidate, job.all, width), raw: (width) => buildRawSlice(job.text, job.candidate, width) });
     });
     if (items.length > 0) await this.judgeItems(items, findings, budget, owner, signal, progress);
     // The last guard: every reason that leaves this service is one of our fixed sentences.

@@ -10,9 +10,14 @@ interface SlackMessage {
 const isMessage = (item: unknown): item is SlackMessage =>
   typeof item === 'object' && item !== null && typeof (item as SlackMessage).ts === 'string' && /^\d+(\.\d+)?$/.test((item as SlackMessage).ts) && typeof (item as SlackMessage).text === 'string';
 
-function authorOf(message: SlackMessage): string {
-  const name = message.user_profile?.display_name || message.user_profile?.real_name || message.user_name || message.username || message.user || 'unknown';
+// A person's name as the chat line reader expects it: no spaces, so "ben - Infra" becomes "ben_-_Infra".
+// Messages are joined into one split key only when the name before them matches.
+export function nameToken(name: string): string {
   return name.trim().replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown';
+}
+
+function authorOf(message: SlackMessage): string {
+  return nameToken(message.user_profile?.display_name || message.user_profile?.real_name || message.user_name || message.username || message.user || 'unknown');
 }
 
 export function readSlackMessages(raw: string): { text: string; messages: number } | null {

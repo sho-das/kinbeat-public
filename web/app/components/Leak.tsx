@@ -103,7 +103,8 @@ export function Leak() {
       setStage(1);
       for (let i = 0; i < lines.length; i++) {
         setCursor(i);
-        await wait(i === 0 ? 900 : 650);
+        // The second person (the key line) waits a second longer before typing, as if thinking before sharing it.
+        await wait(i === 0 ? 900 : i === 1 ? 1650 : 650);
         for (let n = 1; n <= lines[i].length; n++) {
           setTyped((t) => t.map((v, j) => (j === i ? n : v)));
           await wait(keystroke(lines[i][n - 1]));
@@ -111,8 +112,9 @@ export function Leak() {
         await wait(400);
       }
       setCursor(-1);
+      // Scan starts once the last line ("... into the config now") is written, and stays lit 3.2 seconds.
       setStage(2);
-      await wait(2200);
+      await wait(3200);
       setStage(3);
       await wait(2600);
       setStage(4);

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { nameToken } from '../extract/slack';
 import { UploadedFile } from '../extract/types';
 import { ScanService } from '../scan.service';
 import { SlackClient } from './slack.client';
@@ -68,6 +69,7 @@ export class SlackService {
   // Reads SLACK_SCAN_MESSAGES messages of one chat, newest first, with their thread replies, and scans them.
   // The answer includes where to carry on, so the page can offer the next messages.
   async scan(token: string, chatId: string, cursor: string | undefined, useModel: boolean, signal: AbortSignal, progress: (done: number, total: number) => void) {
+    if (useModel) this.scans.wakeModel();
     const names = await this.people(token, signal);
     const info = await this.slack.call<{ channel: unknown }>('conversations.info', token, { channel: chatId }, signal).catch(() => null);
     if (!info) throw new NotFoundException('Slack could not find this chat, or you cannot read it.');
@@ -110,7 +112,7 @@ export class SlackService {
         // [hh:mm] name: text is the chat line shape the scanner reads, also for keys split over messages of one person.
         const hhmm = new Date(Number(m.ts) * 1000).toISOString().slice(11, 16);
         for (const [i, row] of plainText(m.text!, names).split('\n').entries()) {
-          text.push(i === 0 ? `[${hhmm}] ${author(m)}: ${row}` : row);
+          text.push(i === 0 ? `[${hhmm}] ${nameToken(author(m))}: ${row}` : row);
           lines.push(m);
         }
       }

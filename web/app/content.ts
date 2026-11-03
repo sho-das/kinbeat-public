@@ -89,6 +89,7 @@ export const content = {
   right: {
     title: "Results",
     empty: "Your findings will appear here.",
+    cancelled: "Scan cancelled.",
     emptyHint: "Each finding shows where it was found, a hidden preview and what KinBeat says. Pick a tab, then press Scan.",
     exampleType: "Cloud access key",
     tallyLabel: "Summary of findings",
@@ -138,8 +139,8 @@ export const content = {
   },
   scanSection: {
     title: "Try a free scan",
-    // 98.9% is the latest live run (181 of 183 cases, 2026-11-02); 130,000 counts cases, reached before launch.
-    strip: "Tested over 130,000+ cases with an accuracy of 98.9%.",
+    // 98.9% is the latest live run (181 of 183 cases, 2026-11-02); 230,000 counts cases before launch plus the 100,000-message Slack test (user decision, 2026-11-02).
+    strip: "Tested over 230,000+ cases with an accuracy of 98.9%.",
   },
   faq: {
     title: "Questions",
@@ -148,7 +149,7 @@ export const content = {
       { q: "What can I scan?", a: "Chats and text, images, PDFs and Word files. Also zip files and folders, Markdown, CSV, JSON, log, .env and config files, and code files. One file at a time, up to 10 MB. To scan many files, put them in one zip file." },
       { q: "How are hidden tokens found?", a: "Rules and decoders read scrambled text (base64), hex, URL codes, spelled-out letters, NATO code words, number words and tokens split over messages." },
       { q: "What does the KinBeat check do?", a: "It reads the masked piece and says real, possible or example. It does not get the secrets we found." },
-      { q: "How accurate is KinBeat?", a: "We have tested over 130,000 cases, with an accuracy of 98.9%." },
+      { q: "How accurate is KinBeat?", a: "We have tested over 230,000 cases, with an accuracy of 98.9%." },
       { q: "Is the scan free?", a: "Yes. You can scan real chats and files." },
     ],
   },
@@ -165,9 +166,9 @@ export const content = {
   leak: {
     title: "This could be your live data",
     chat: [
-      { who: "[10:41] mira:", text: "deploy is failing again" },
-      { who: "[10:42] sam:", text: "The SSO key ", key: "AK••••••••••01", after: " was missing" },
-      { who: "[10:42] mira:", text: "thanks, pasting it into the config now" },
+      { who: "[10:43] emma:", text: "deploy is failing again" },
+      { who: "[10:45] jack:", text: "The SSO key ", key: "AK••••••••••01", after: " was missing" },
+      { who: "[10:45] emma:", text: "thanks, pasting it into the config now" },
     ],
     note: "One message is enough",
     // Other places a key hides, scanned in the story after the chat. Names and values are made up and masked.
@@ -178,9 +179,9 @@ export const content = {
       { kind: "github", name: "deploy.yml", place: "GitHub, line 14", line: "token: ", key: "ghp_••••••" },
     ],
     steps: [
-      { title: "Add it", text: "Paste a chat, upload a file, or pick from Google Drive or GitHub." },
-      { title: "Find it", text: "KinBeat finds keys, tokens and passwords, even hidden ones." },
-      { title: "Judge it", text: "We show you the real ones, so you can change them." },
+      { title: "Connect", text: "Paste a chat, upload a file, or connect Google Drive, Slack, GitHub or a website." },
+      { title: "Scan", text: "Scan through your files and change exposed tokens before it's too late." },
+      { title: "Find", text: "KinBeat finds exposed keys, tokens and passwords, even hidden ones." },
     ],
   },
   closing: "Before hackers do.",
