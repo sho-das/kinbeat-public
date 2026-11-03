@@ -359,17 +359,6 @@ body:has(.night){background:#05081A}
 .night .lede-source{margin-top:10px;font-size:.9rem;color:var(--muted)}
 .night .lede-source a{color:var(--muted)}
 
-/* Proof band */
-.night .proof{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);background:#0A0F26}
-.night .proof__grid{display:grid;grid-template-columns:1fr}
-.night .proof__item{display:grid;gap:8px;justify-items:center;text-align:center;padding:clamp(28px,4vw,44px) 16px;border-bottom:1px solid var(--rule)}
-.night .proof__item:last-child{border-bottom:0}
-.night .proof__item b{font:700 clamp(2.4rem,4vw,3.4rem)/1 var(--font-head);color:var(--orange)}
-.night .proof__item span{font-weight:600;color:var(--ink);max-width:24ch}
-.night .proof__item small{font-size:.9rem;color:var(--muted)}
-.night .proof__item small a{color:var(--muted)}
-@media(min-width:640px){.night .proof__grid{grid-template-columns:repeat(2,1fr)}.night .proof__item:nth-child(odd){border-right:1px solid var(--rule)}}
-@media(min-width:1100px){.night .proof__grid{grid-template-columns:repeat(4,1fr)}.night .proof__item{border-bottom:0;border-right:1px solid var(--rule)}.night .proof__item:last-child{border-right:0}}
 
 /* Section headings: plain, no labels above them */
 .night h2.big{color:var(--ink);text-transform:none;font-size:clamp(2rem,1.3rem + 3vw,3.6rem);line-height:1.05}
@@ -508,3 +497,34 @@ body:has(.night){background:#05081A}
 /* Google Drive picker: Google adds it at the page's end and focuses it, which scrolls the page there. Pin it to the screen. */
 .picker-dialog-bg{position:fixed!important;inset:0}
 .picker-dialog{position:fixed!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%);max-width:calc(100vw - 16px)}
+
+/* Scan window as a chat: a title bar across the top, and each pane as a message bubble with one squared corner. */
+.night .console.chat{padding-top:0;border-radius:18px;overflow:hidden}
+.chat__bar{grid-column:1/-1;display:flex;align-items:center;gap:12px;margin:0 calc(-1 * clamp(16px,3vw,32px));padding:14px clamp(16px,3vw,32px);border-bottom:1px solid var(--rule);background:var(--paper3)}
+.chat__bar b{font:700 1.05rem var(--font-head);color:var(--ink)}
+.chat__avatar{width:32px;height:32px;border-radius:50%;background:radial-gradient(circle at 50% 50%,var(--hl-red) 0 5px,transparent 6px),var(--black);border:1px solid var(--line2)}
+.chat__status{width:9px;height:9px;border-radius:50%;background:var(--teal);margin-left:auto}
+.chat__status.busy{background:var(--yellow);animation:brand-pulse 1.2s infinite}
+.night .console.chat > .pane{position:relative;background:var(--paper);border:1px solid var(--rule);border-radius:16px;padding:clamp(16px,2.4vw,24px)}
+.night .console.chat > .pane:nth-of-type(1){border-top-right-radius:4px}
+.night .console.chat > .pane:nth-of-type(2){border-top-left-radius:4px}
+@media(prefers-reduced-motion:reduce){.chat__status.busy{animation:none}}
+
+/* The size of it: the dot field with the live count beside it, and the report numbers under both. */
+.sizesec{padding:clamp(72px,9vw,128px) 0 0}
+.sizesec__title{font:700 clamp(3.4rem,9vw,8.4rem)/.9 var(--font-head);letter-spacing:-.04em;color:var(--ink);font-variant-numeric:tabular-nums}
+.sizesec__sub{margin-top:16px;max-width:44ch;font-size:clamp(1.15rem,1rem + .5vw,1.4rem);color:var(--ink2)}
+.sizesec__src{font:300 .8rem/1.45 var(--font-mono);color:var(--muted)}
+.sizesec__src a{color:var(--ink2)}
+.livecount{display:grid;grid-template-columns:1fr;gap:32px;align-items:center;margin-top:48px}
+@media(min-width:900px){.livecount{grid-template-columns:1.6fr 1fr;gap:48px}}
+.dotfield canvas{display:block;width:100%;height:auto;color:var(--orange)}
+.livecount__card{background:var(--paper2);border:1px solid var(--rule);border-radius:10px;padding:24px}
+.livecount__card p:first-child{font-weight:600;color:var(--ink)}
+.livecount__tick{display:block;margin:10px 0 4px;font:700 3.6rem/1 var(--font-head);color:var(--orange);font-variant-numeric:tabular-nums}
+.facts3{display:grid;grid-template-columns:1fr;gap:16px;margin-top:40px}
+@media(min-width:640px){.facts3{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1100px){.facts3{grid-template-columns:repeat(4,1fr)}}
+.facts3 > div{border-top:2px solid var(--orange);padding-top:16px}
+.facts3 b{display:block;font:700 2.6rem/1 var(--font-head);color:var(--ink)}
+.facts3 p{margin:8px 0 6px}

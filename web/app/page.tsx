@@ -5,6 +5,7 @@ import { Scanner } from "./components/Scanner";
 import { Settle } from "./components/Settle";
 import { Globe } from "./components/Globe";
 import { Leak } from "./components/Leak";
+import { SizeSection } from "./components/Dots";
 
 const jsonLd = [
   {
@@ -76,21 +77,7 @@ export default function Home() {
           </div>
         </header>
 
-        <section className="proof" aria-label="Leaks in numbers">
-          <div className="wrap proof__grid">
-            {C.proof.map((p) => (
-              <div key={p.figure} className="proof__item">
-                <b>{p.figure}</b>
-                <span>{p.text}</span>
-                <small>
-                  <a href={p.url} target="_blank" rel="noopener noreferrer">
-                    {p.source}
-                  </a>
-                </small>
-              </div>
-            ))}
-          </div>
-        </section>
+        <SizeSection />
 
         <section className="section leak-section" id="how" aria-labelledby="leak-h">
           <div className="wrap">

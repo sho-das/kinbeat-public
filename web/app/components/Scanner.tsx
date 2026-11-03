@@ -492,7 +492,13 @@ export function Scanner() {
         }}
         onCancel={() => setAskMode(null)}
       />
-    <section className="console" aria-label="Scan and results">
+    <section className="console chat" aria-label="Scan and results">
+      {/* A chat app's title bar: the scan window reads as a conversation with KinBeat. */}
+      <div className="chat__bar" aria-hidden="true">
+        <span className="chat__avatar" />
+        <b>{content.name}</b>
+        <span className={`chat__status${busy ? " busy" : ""}`} />
+      </div>
       <div className="pane">
         <h3 className="ph">{L.title}</h3>
         <div className="srcpanel" id="srcpanel" role="tabpanel" aria-labelledby={`tab-${mode}`}>

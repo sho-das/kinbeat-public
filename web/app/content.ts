@@ -163,6 +163,17 @@ export const content = {
     { figure: "3.3B", text: "stolen credentials and cloud tokens from infostealers in 2025", source: "Flashpoint, 2026 Global Threat Intelligence Report", url: "https://flashpoint.io/blog/global-threat-intelligence-report-2026/" },
     { figure: "109:1", text: "machine identities for every human identity", source: "Palo Alto Networks, Identity Security Landscape 2026", url: "https://www.paloaltonetworks.com/idira/identity-security-landscape-report" },
   ],
+  // The size of it: a dot field, a live count beside it, and the outside report numbers (proof) under both.
+  size: {
+    title: "Every dot is 100,000 secrets leaked on public GitHub in 2025.",
+    // 286 dots (28.6 million / 100,000), scattered over a faint grid of 2,865 places.
+    dots: 286,
+    places: 2865,
+    // GitGuardian's 2025 total, spread evenly over the year's seconds for the live count.
+    yearTotal: 28_649_024,
+    sinceTitle: "Since you opened this page",
+    sinceText: "new secrets were pushed to public GitHub, about one a second.",
+  },
   leak: {
     title: "This could be your live data",
     chat: [
