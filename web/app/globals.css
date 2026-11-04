@@ -550,6 +550,6 @@ footer.foot .legal-links a{color:#fff;text-decoration:none;border-bottom:1px sol
 .night .hero{--globe-box:min(1500px,130vw);--globe-arc:clamp(110px,16vw,240px);min-height:0;padding:clamp(120px,14vw,156px) 0 calc(var(--globe-arc) + 48px);background:radial-gradient(50% 40% at 50% 100%,rgba(232,98,44,.14),transparent 70%),var(--paper)}
 .night .hero__copy{text-align:center}
 .night h1 .w{margin-inline:auto;white-space:normal}
-.night .lede{margin-inline:auto;max-width:none}
+.night .lede{margin-inline:auto}
 .night .hero .cta{justify-content:center}
 .night .globe{--globe-cx:.5;--globe-cy:.5;--globe-r:.48;--globe-tilt:-0.35;top:auto;bottom:calc(var(--globe-arc) - var(--globe-box));left:50%;right:auto;width:var(--globe-box);height:var(--globe-box);transform:translateX(-50%);opacity:.95}
