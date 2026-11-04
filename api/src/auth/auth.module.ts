@@ -3,7 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { AuditService } from './audit.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { LogMailSender, ZeptoMailSender, mailMode } from './mail';
+import { makeMailSender } from './mail';
 import { SessionGuard } from './session.guard';
 import { CLOCK, MAIL_SENDER } from './tokens';
 
@@ -15,10 +15,10 @@ import { CLOCK, MAIL_SENDER } from './tokens';
     { provide: CLOCK, useValue: { now: () => Date.now() } },
     {
       provide: MAIL_SENDER,
-      useFactory: () => (mailMode() === 'zeptomail' ? new ZeptoMailSender() : new LogMailSender()),
+      useFactory: () => makeMailSender(),
     },
     { provide: APP_GUARD, useClass: SessionGuard },
   ],
-  exports: [AuthService, AuditService],
+  exports: [AuthService, AuditService, MAIL_SENDER],
 })
 export class AuthModule {}

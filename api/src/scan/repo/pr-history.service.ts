@@ -61,9 +61,9 @@ export class PrHistoryService {
     private readonly scans: ScanService,
   ) {}
 
-  async scan(owner: string, repo: string, wanted: number, signal: AbortSignal, token: string, useModel: boolean, progress: (done: number, total: number) => void = () => {}): Promise<HistoryResult> {
+  async scan(owner: string, repo: string, wanted: number, signal: AbortSignal, token: string, useModel: boolean, progress: (done: number, total: number, step?: 'read' | 'ai') => void = () => {}, base?: string): Promise<HistoryResult> {
     const count = Math.min(Math.max(wanted, 1), PR_HISTORY_MAX);
-    const numbers = await this.github.mergedPulls(owner, repo, count, signal, token);
+    const numbers = await this.github.mergedPulls(owner, repo, count, signal, token, base);
     progress(0, numbers.length);
 
     // Pass 1: the rules only, one pull request at a time. Nothing is judged here, so this pass costs no model calls.
@@ -115,9 +115,9 @@ export class PrHistoryService {
     }
 
     // Pass 2: each unique secret is judged once, from its first line only. Only the first PR_HISTORY_MAX_SECRETS are sent.
-    // The progress shows 95% while the AI step runs, so the page does not sit at 99 of 100 during the slowest part.
+    // The AI check is its own step on the page, so reading shows complete and the AI row takes over.
     const unique = [...occurrences.entries()];
-    progress(Math.floor(numbers.length * 0.95), numbers.length);
+    progress(numbers.length, numbers.length, 'ai');
     const judged = unique.slice(0, PR_HISTORY_MAX_SECRETS);
     const judges = new Map<string, { status: string; mode?: string; verdict?: string; code?: string; reason?: string }>();
     if (judged.length > 0) {
@@ -160,7 +160,7 @@ export class PrHistoryService {
       failedPulls,
       secrets,
       notChecked: unique.length - judged.length,
-      note: `Last ${numbers.length} merged pull requests. Only their added and removed lines were checked. Pull requests over 1 MB were not checked. Files with no text (too big for GitHub) were not checked: ${notRead}.`,
+      note: `Last ${numbers.length} merged pull requests${base ? ` into ${base}` : ''}. Only their added and removed lines were checked. Pull requests over 1 MB were not checked. Files with no text (too big for GitHub) were not checked: ${notRead}.`,
       mode: 'history',
       model: useModel ? 'muse' : 'rules',
       summary: { findings: findings.length, blocked: 0, errors: 0 },

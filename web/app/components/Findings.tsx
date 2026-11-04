@@ -32,6 +32,51 @@ function VerdictTag({ kind }: { kind: keyof typeof R.verdict }) {
   );
 }
 
+// The popup for one finding: where it was found, the masked line, and why KinBeat AI said so. No fold, no height.
+export function FindingDetail({ finding, repo }: { finding: Finding; repo?: { owner: string; repo: string; sha: string } }) {
+  const githubUrl = githubLineUrl(repo, finding.place);
+  const kind = verdictKind(finding);
+  const reason = kind !== "off" ? finding.judge.reason || "" : R.reasonOff;
+  const tag = kind === "timeout" || kind === "limit";
+  return (
+    <div className={`finddetail ${kind}`}>
+      {tag && <VerdictTag kind={kind} />}
+      <dl className="facts">
+        <div>
+          <dt>{R.where}</dt>
+          <dd>
+            {placeLabel(finding.place)}
+            {githubUrl && <GithubLink url={githubUrl} />}
+          </dd>
+        </div>
+        {finding.line && (
+          <div>
+            <dd>
+              <pre className="slice">
+                {finding.line.before}
+                <mark>{finding.line.mark}</mark>
+                {finding.line.after}
+                {finding.line.more?.map((m, i) => (
+                  <span key={i}>
+                    {"\n"}
+                    {m.before}
+                    <mark>{m.mark}</mark>
+                    {m.after}
+                  </span>
+                ))}
+              </pre>
+            </dd>
+          </div>
+        )}
+        <div className="reason">
+          <dt>{R.reason}</dt>
+          <dd>{[finding.encoding === "plain" ? "" : `${R.hiddenAs} ${encodingLabel(finding).toLowerCase()}.`, finding.found, reason].filter(Boolean).join(" ")}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
 export function FindingCard({ finding, index, repo }: { finding: Finding; index: number; repo?: { owner: string; repo: string; sha: string } }) {
   const githubUrl = githubLineUrl(repo, finding.place);
   const kind = verdictKind(finding);

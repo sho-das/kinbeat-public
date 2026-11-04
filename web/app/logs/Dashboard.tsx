@@ -1,14 +1,17 @@
 "use client";
 
+import { Wordmark } from "../components/Wordmark";
+
 import { useEffect, useState } from "react";
 import { getMe, signOut } from "../lib/logs";
 import { Audit } from "./tabs/Audit";
 import { Cases } from "./tabs/Cases";
 import { Checks } from "./tabs/Checks";
 import { Evals } from "./tabs/Evals";
+import { Messages } from "./tabs/Messages";
 import { Scans } from "./tabs/Scans";
 
-type Tab = "scans" | "cases" | "checks" | "evals" | "audit";
+type Tab = "scans" | "cases" | "checks" | "evals" | "audit" | "messages";
 
 export function Dashboard() {
   const [gate, setGate] = useState<"checking" | "open" | "signin">("checking");
@@ -56,7 +59,7 @@ function Board({ email }: { email: string }) {
     <div className="dash">
       <header className="dash-top">
         <a className="brand" href="/" aria-label="KinBeat, home">
-          <span>KinBeat</span>
+          <Wordmark />
         </a>
         <h1>Logs</h1>
         <span className="dash-user">{email}</span>
@@ -86,9 +89,12 @@ function Board({ email }: { email: string }) {
           <button role="tab" aria-selected={tab === "audit"} onClick={() => setTab("audit")}>
             Audit
           </button>
+          <button role="tab" aria-selected={tab === "messages"} onClick={() => setTab("messages")}>
+            Messages
+          </button>
         </div>
       </header>
-      <main className="dash-main">{tab === "scans" ? <Scans /> : tab === "cases" ? <Cases focus={focusCase} /> : tab === "checks" ? <Checks /> : tab === "audit" ? <Audit /> : <Evals />}</main>
+      <main className="dash-main">{tab === "messages" ? <Messages /> : tab === "scans" ? <Scans /> : tab === "cases" ? <Cases focus={focusCase} /> : tab === "checks" ? <Checks /> : tab === "audit" ? <Audit /> : <Evals />}</main>
     </div>
   );
 }

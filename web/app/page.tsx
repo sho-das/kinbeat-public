@@ -3,8 +3,8 @@ import { Footer } from "./components/Footer";
 import { Nav } from "./components/Nav";
 import { Scanner } from "./components/Scanner";
 import { Settle } from "./components/Settle";
+import { Contact } from "./components/Contact";
 import { Globe } from "./components/Globe";
-import { Leak } from "./components/Leak";
 import { SizeSection } from "./components/Dots";
 
 const jsonLd = [
@@ -14,7 +14,7 @@ const jsonLd = [
     name: C.name,
     applicationCategory: "SecurityApplication",
     operatingSystem: "Web",
-    description: "Finds exposed tokens, keys and passwords in chats, documents and images.",
+    description: "Scan text, files, websites, GitHub, Google Drive and Slack chats",
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
   },
   {
@@ -23,7 +23,7 @@ const jsonLd = [
     mainEntity: C.faq.items.map((f) => ({
       "@type": "Question",
       name: f.q,
-      acceptedAnswer: { "@type": "Answer", text: f.a },
+      acceptedAnswer: { "@type": "Answer", text: f.a.replace("{video}", "this video") },
     })),
   },
 ];
@@ -60,33 +60,15 @@ export default function Home() {
               </span>
             </h1>
             <p className="lede">{C.lead}</p>
-            <p className="lede-source">
-              Source:{" "}
-              <a href={C.leadSource.url} target="_blank" rel="noopener noreferrer">
-                {C.leadSource.name}
-              </a>
-            </p>
             <div className="cta">
               <a className="btn" href="#scan">
                 {C.cta.primary}
-              </a>
-              <a className="btn ghost" href="#how">
-                {C.cta.secondary}
               </a>
             </div>
           </div>
         </header>
 
         <SizeSection />
-
-        <section className="section leak-section" id="how" aria-labelledby="leak-h">
-          <div className="wrap">
-            <h2 className="big" id="leak-h">
-              {C.leak.title}
-            </h2>
-            <Leak />
-          </div>
-        </section>
 
         <section className="section" id="scan" aria-labelledby="scan-h">
           <div className="wrap">
@@ -109,23 +91,28 @@ export default function Home() {
               {C.faq.items.map((f) => (
                 <details key={f.q}>
                   <summary>{f.q}</summary>
-                  <p>{f.a}</p>
+                  <p>
+                    {/* "{video}" in an answer becomes a link to that item's video, opened in a new tab. */}
+                    {f.a.split("{video}").map((part, i) =>
+                      i === 0 ? (
+                        part
+                      ) : (
+                        <span key={i}>
+                          <a href={f.video} target="_blank" rel="noopener noreferrer">
+                            this video
+                          </a>
+                          {part}
+                        </span>
+                      ),
+                    )}
+                  </p>
                 </details>
               ))}
             </div>
           </div>
         </section>
 
-        <section className="closing" aria-labelledby="closing-h">
-          <div className="wrap">
-            <h2 className="closing__big" id="closing-h">
-              {C.closing.split(/(hackers do\.?)/i).map((part, i) => (/^hackers do/i.test(part) ? <em key={i}>{part}</em> : part))}
-            </h2>
-            <a className="btn" href="#scan">
-              {C.cta.primary}
-            </a>
-          </div>
-        </section>
+        <Contact />
       </main>
 
       <Footer />

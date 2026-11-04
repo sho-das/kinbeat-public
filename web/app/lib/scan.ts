@@ -59,7 +59,8 @@ export interface ScanResult {
   model: string;
   confidenceNote?: string;
   files?: FileNote[];
-  repo?: { owner: string; repo: string; sha: string; files: number; skipped: Record<string, number>; note: string };
+  // counts is set for a public repository scanned without a token: the server sends how many findings, never the rows.
+  repo?: { owner: string; repo: string; sha: string; files: number; skipped: Record<string, number>; note: string; counts?: { real: number; possible: number; other: number } };
   // A Slack scan: the chat, how many messages were read, and where the next scan carries on, if there are more.
   slack?: { messages: number; read: number; next?: string };
   summary: { findings: number; blocked: number; errors: number; unread?: number; unverified?: number; timeouts?: number; limited?: number };

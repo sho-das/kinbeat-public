@@ -1,5 +1,7 @@
 "use client";
 
+import { Wordmark } from "../components/Wordmark";
+
 import { useState } from "react";
 import { LogsError, requestLink } from "../lib/logs";
 
@@ -25,7 +27,7 @@ export function LoginForm() {
     <div className="dash">
       <main className="dash-main dash-gate">
         <a className="brand" href="/" aria-label="KinBeat, home">
-          <span>KinBeat</span>
+          <Wordmark />
         </a>
         <h1>Sign in</h1>
         {state === "sent" ? (

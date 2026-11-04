@@ -1,0 +1,23 @@
+# Builds the website image on Cloud Build with the public values baked in.
+# Run from web/: gcloud builds submit . --config cloudbuild.yaml --substitutions=_API_URL=...,_SITE_URL=...,_TAG=1
+substitutions:
+  _API_URL: ""
+  _SITE_URL: "https://kinbeat.com"
+  _GOOGLE_CLIENT_ID: ""
+  _GOOGLE_API_KEY: ""
+  _GOOGLE_APP_ID: ""
+  _TAG: "1"
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=API_URL=${_API_URL}
+      - --build-arg=NEXT_PUBLIC_SITE_URL=${_SITE_URL}
+      - --build-arg=NEXT_PUBLIC_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}
+      - --build-arg=NEXT_PUBLIC_GOOGLE_API_KEY=${_GOOGLE_API_KEY}
+      - --build-arg=NEXT_PUBLIC_GOOGLE_APP_ID=${_GOOGLE_APP_ID}
+      - -t
+      - europe-west2-docker.pkg.dev/${PROJECT_ID}/app/web:${_TAG}
+      - .
+images:
+  - europe-west2-docker.pkg.dev/${PROJECT_ID}/app/web:${_TAG}

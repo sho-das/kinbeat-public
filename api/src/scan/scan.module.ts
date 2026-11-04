@@ -7,6 +7,10 @@ import { PictureReader } from './extract/picture-reader';
 import { Hasher } from './hasher';
 import { LogsController } from './logs.controller';
 import { MuseClient } from './muse.client';
+import { AskService } from './ask.service';
+import { StatsService } from './stats.service';
+import { ContactController } from './contact.controller';
+import { ContactService } from './contact.service';
 import { GithubClient } from './repo/github.client';
 import { RepoScanService } from './repo/repo-scan.service';
 import { PrHistoryService } from './repo/pr-history.service';
@@ -24,7 +28,7 @@ import { SlackSessions } from './slack/slack.sessions';
 import { ScanProgress } from './progress';
 @Module({
   imports: [AuthModule],
-  controllers: [ScanController, LogsController, CasesController, SlackController],
-  providers: [ScanService, ScanLog, CasesService, MuseClient, Hasher, PictureReader, ExtractorService, GithubClient, RepoCache, RepoScanService, PrHistoryService, PrHistoryJobs, ScanProgress, SlackClient, SlackSessions, SlackService, SiteScanService],
+  controllers: [ScanController, LogsController, CasesController, SlackController, ContactController],
+  providers: [ScanService, ScanLog, CasesService, MuseClient, Hasher, PictureReader, ExtractorService, GithubClient, RepoCache, RepoScanService, PrHistoryService, PrHistoryJobs, ScanProgress, SlackClient, SlackSessions, SlackService, SiteScanService, AskService, StatsService, ContactService],
 })
 export class ScanModule {}

@@ -11,9 +11,9 @@ const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "600"], var
 // The handwritten note next to the circled key.
 const caveat = Caveat({ subsets: ["latin"], weight: ["600"], variable: "--font-hand", display: "swap" });
 
-const title = "KinBeat - Find exposed tokens before hackers do";
+const title = "KinBeat | Finds exposed tokens for free";
 const description =
-  "Find your exposed tokens before hackers do. Scan chats, PDFs, Word files and images. Free scan.";
+  "Scan text, files, websites, GitHub, Google Drive and Slack chats";
 
 export const metadata: Metadata = {
   metadataBase: new URL(site),

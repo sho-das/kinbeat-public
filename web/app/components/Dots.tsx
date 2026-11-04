@@ -8,7 +8,8 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // One dot for every 100,000 secrets. A faint grid of 2,865 places first, then 286 dots land on places
-// picked in a fixed scattered order, once the field scrolls into view.
+// picked in a fixed scattered order, once the field scrolls into view. After that, dots blink: one goes out and
+// another lights up elsewhere, so there are always 286.
 function DotField() {
   const canvas = useRef<HTMLCanvasElement>(null);
 
@@ -16,7 +17,7 @@ function DotField() {
     const cv = canvas.current;
     const ctx = cv?.getContext("2d");
     if (!cv || !ctx) return;
-    const cols = 90;
+    const cols = 70;
     const rows = Math.ceil(S.places / cols);
     const gx = cv.width / cols;
     const gy = cv.height / rows;
@@ -31,8 +32,12 @@ function DotField() {
       ctx.fillStyle = orange;
       at(k, r);
     };
-    ctx.fillStyle = "rgba(246,241,231,.08)";
-    for (let k = 0; k < S.places; k++) at(k, r * 0.5);
+    const faint = (k: number) => {
+      ctx.clearRect(gx * (k % cols), gy * Math.floor(k / cols), gx, gy);
+      ctx.fillStyle = "rgba(246,241,231,.08)";
+      at(k, r * 0.5);
+    };
+    for (let k = 0; k < S.places; k++) faint(k);
     // A seeded shuffle, so the dots land scattered but the same way on every visit.
     const order = Array.from({ length: S.places }, (_, i) => i);
     let seed = 7;
@@ -46,6 +51,34 @@ function DotField() {
       return;
     }
     let frame = 0;
+    let blink = 0;
+    // Every second a random handful of dots, 6 to 10, fade out over half a second, and the same number
+    // fade in at random places. The lit count never changes.
+    const lit = order.slice(0, S.dots);
+    const dark = order.slice(S.dots);
+    const fade = (k: number, from: number, to: number) => {
+      const t0 = performance.now();
+      const tick = (t: number) => {
+        const p = Math.min(1, (t - t0) / 500);
+        faint(k);
+        ctx.globalAlpha = from + (to - from) * p;
+        dot(k);
+        ctx.globalAlpha = 1;
+        if (p < 1) requestAnimationFrame(tick);
+        else if (to === 0) faint(k);
+      };
+      requestAnimationFrame(tick);
+    };
+    const twinkle = () => {
+      const n = 6 + Math.floor(Math.random() * 5);
+      for (let m = 0; m < n; m++) {
+        const i = Math.floor(Math.random() * lit.length);
+        const j = Math.floor(Math.random() * dark.length);
+        fade(lit[i], 1, 0);
+        fade(dark[j], 0, 1);
+        [lit[i], dark[j]] = [dark[j], lit[i]];
+      }
+    };
     const watcher = new IntersectionObserver((entries) => {
       if (!entries[0]?.isIntersecting) return;
       watcher.disconnect();
@@ -54,6 +87,7 @@ function DotField() {
       const step = () => {
         for (let m = 0; m < per && n < S.dots; m++) dot(order[n++]);
         if (n < S.dots) frame = requestAnimationFrame(step);
+        else blink = window.setInterval(twinkle, 1000);
       };
       step();
     }, { threshold: 0.35 });
@@ -61,37 +95,50 @@ function DotField() {
     return () => {
       watcher.disconnect();
       cancelAnimationFrame(frame);
+      window.clearInterval(blink);
     };
   }, []);
 
-  return <canvas ref={canvas} width={2400} height={860} role="img" aria-label={`${fmt(S.dots)} dots. ${S.title}`} />;
+  return <canvas ref={canvas} width={2400} height={1400} role="img" aria-label={`${fmt(S.dots)} dots. ${S.title}`} />;
 }
 
-// The dot field, a live count beside it (the 2025 total spread evenly over the year's seconds), and the report numbers under both.
+// The dot field, the site's live numbers beside it, and the report numbers under both.
 export function SizeSection() {
-  const [since, setSince] = useState(0);
+  // Scans started and sessions since launch, from the server. Loading the page counts this visit.
+  const [live, setLive] = useState<{ scans: number; sessions: number } | null>(null);
   useEffect(() => {
-    const perSecond = S.yearTotal / (365 * 24 * 60 * 60);
-    const start = Date.now();
-    const t = window.setInterval(() => setSince(Math.floor(((Date.now() - start) / 1000) * perSecond)), still() ? 5000 : 250);
-    return () => window.clearInterval(t);
+    fetch("/api/stats", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && typeof data.scans === "number" && typeof data.sessions === "number") setLive(data);
+      })
+      .catch(() => {});
   }, []);
 
   return (
     <section className="sizesec" id="size" aria-labelledby="size-h">
       <div className="wrap">
         <h2 className="sizesec__title" id="size-h">
-          {fmt(S.yearTotal)}
+          <b>{fmt(S.yearTotal)}</b> {S.yearLine}
         </h2>
-        <p className="sizesec__sub">{S.title}</p>
         <div className="livecount">
-          <div className="dotfield">
-            <DotField />
+          <div>
+            <p className="sizesec__sub">{S.title}</p>
+            <div className="dotfield">
+              <DotField />
+            </div>
           </div>
           <div className="livecount__card" aria-live="off">
-            <p>{S.sinceTitle}</p>
-            <span className="livecount__tick">{fmt(since)}</span>
-            <p>{S.sinceText}</p>
+            <p className="livecount__head">
+              <span className="livecount__live" aria-hidden="true" />
+              {S.sinceTitle}
+            </p>
+            <span className="livecount__tick">{fmt(S.scansBase + (live?.scans ?? 0))}</span>
+            <p>
+              {S.sinceText.split("{sessions}")[0]}
+              <b>{live ? fmt(live.sessions) : "0"}</b>
+              {S.sinceText.split("{sessions}")[1]}
+            </p>
           </div>
         </div>
         <div className="facts3">

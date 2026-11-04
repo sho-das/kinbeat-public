@@ -24,6 +24,30 @@ const limitNote = (token?: string) => `Some files were not scanned. For now we s
 
 type Result = Record<string, unknown> & { repo?: Record<string, unknown> };
 
+type Judged = { judge: { status: string; verdict?: string }; confidence?: { level?: string } };
+// The same grouping the page uses: real, possible, or other. Example and not-a-secret are not shown, so they are not counted.
+function groupOf(finding: Judged): 'real' | 'possible' | 'other' | null {
+  const { status, verdict } = finding.judge;
+  if (status === 'timeout' || status === 'error' || status === 'limit') return null;
+  if (status === 'blocked') return 'real';
+  if (status === 'unverified') return 'possible';
+  if (status !== 'ok') return 'other';
+  if (verdict === 'example' || verdict === 'not_secret') return null;
+  if (verdict === 'real') return finding.confidence?.level === 'low' ? 'possible' : 'real';
+  return 'possible';
+}
+
+// A public repository without a token gets numbers only: how many real and possible findings, never where or what.
+// Done here on the server, so the browser never receives the rows.
+export function countsOnly(result: Result): Result {
+  const counts = { real: 0, possible: 0, other: 0 };
+  for (const finding of (result.findings ?? []) as Judged[]) {
+    const group = groupOf(finding);
+    if (group) counts[group] += 1;
+  }
+  return { ...result, findings: [], repo: { ...result.repo, counts } };
+}
+
 @Injectable()
 export class RepoScanService {
   private readonly logger = new Logger(RepoScanService.name);
@@ -57,11 +81,13 @@ export class RepoScanService {
     // Clients are not told whether a result is saved. The server log keeps count.
     if (saved) {
       this.logger.log(`saved result served ${slug}@${latest.sha.slice(0, 7)}`);
-      return saved;
+      return countsOnly(saved);
     }
 
     // No joining of a scan another visitor started: it would end when that visitor leaves. Each visitor runs their own.
-    return this.build(ownerName, repoName, slug, latest.sha, key, useModel, owner, signal, token, progress);
+    const result = await this.build(ownerName, repoName, slug, latest.sha, key, useModel, owner, signal, token, progress);
+    // The full result is saved for the next visitor and for the admin log, but only a token holder sees the rows.
+    return token ? result : countsOnly(result);
   }
 
   private async build(ownerName: string, repoName: string, slug: string, sha: string, key: string, useModel: boolean, owner: string | undefined, signal: AbortSignal, token?: string, progress?: Progress): Promise<Result> {

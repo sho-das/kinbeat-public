@@ -15,6 +15,8 @@ interface Job<T> {
   state: JobState;
   done: number;
   total: number;
+  // Which part runs: reading messages or pull requests, or the AI check at the end.
+  step: 'read' | 'ai';
   result?: T;
   error?: string;
   at: number;
@@ -28,7 +30,7 @@ export class PrHistoryJobs {
 
   // Starts the work and returns at once. The work reports progress through the callback it is given.
   // The token is kept only as a hash, so one token cannot run two scans, even from different addresses.
-  start<T>(owner: string, token: string, work: (progress: (done: number, total: number) => void, signal: AbortSignal) => Promise<T>): Job<T> {
+  start<T>(owner: string, token: string, work: (progress: (done: number, total: number, step?: 'read' | 'ai') => void, signal: AbortSignal) => Promise<T>): Job<T> {
     this.sweep();
     const tokenKey = createHash('sha256').update(token).digest('hex');
     if (this.running((job) => job.tokenKey === tokenKey) > 0) {
@@ -42,11 +44,12 @@ export class PrHistoryJobs {
       throw new HttpException('KinBeat is busy with other private scans. Try again in a few minutes.', HttpStatus.TOO_MANY_REQUESTS);
     }
     const controller = new AbortController();
-    const job: Job<T> = { id: randomUUID(), owner, tokenKey, state: 'running', done: 0, total: 0, at: Date.now(), controller };
+    const job: Job<T> = { id: randomUUID(), owner, tokenKey, state: 'running', done: 0, total: 0, step: 'read', at: Date.now(), controller };
     this.jobs.set(job.id, job as Job<unknown>);
-    work((done, total) => {
+    work((done, total, step) => {
       job.done = done;
       job.total = total;
+      if (step) job.step = step;
     }, controller.signal).then(
       (result) => {
         job.state = 'done';

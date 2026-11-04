@@ -5,6 +5,7 @@ import { parseCookies, secureCookies } from '../../auth/cookie';
 import { visitorKey } from '../../security/client-ip';
 import { ScanRateLimitGuard } from '../../security/rate-limit';
 import { PrHistoryJobs } from '../repo/pr-history.job';
+import { StatsService } from '../stats.service';
 import { SLACK_USER_SCOPES, SlackClient } from './slack.client';
 import { SlackService } from './slack.service';
 import { SlackSessions } from './slack.sessions';
@@ -29,6 +30,7 @@ export class SlackController {
     private readonly sessions: SlackSessions,
     private readonly slack: SlackService,
     private readonly jobs: PrHistoryJobs,
+    private readonly stats: StatsService,
   ) {}
 
   @Get('start')
@@ -84,6 +86,7 @@ export class SlackController {
   @UseGuards(ScanRateLimitGuard)
   @HttpCode(202)
   scan(@Body() body: { chat?: unknown; cursor?: unknown; useModel?: unknown }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    void this.stats.scan();
     const { chat, cursor, useModel } = body ?? {};
     if (typeof chat !== 'string' || !CHAT_ID.test(chat)) throw new BadRequestException('Pick a Slack chat first.');
     if (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 500)) throw new BadRequestException('cursor must be text');
@@ -93,7 +96,7 @@ export class SlackController {
     const job = this.jobs.start(visitorKey(req), session.token, (progress, signal) =>
       this.sessions.hold(id, () => this.slack.scan(session.token, chat, cursor || undefined, useModel ?? true, AbortSignal.any([signal, AbortSignal.timeout(30 * 60 * 1000)]), progress)),
     );
-    return { id: job.id, state: job.state, done: job.done, total: job.total };
+    return { id: job.id, state: job.state, done: job.done, total: job.total, step: job.step };
   }
 
   private session(req: Request) {

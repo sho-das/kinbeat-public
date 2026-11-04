@@ -68,7 +68,7 @@ export class SlackService {
 
   // Reads SLACK_SCAN_MESSAGES messages of one chat, newest first, with their thread replies, and scans them.
   // The answer includes where to carry on, so the page can offer the next messages.
-  async scan(token: string, chatId: string, cursor: string | undefined, useModel: boolean, signal: AbortSignal, progress: (done: number, total: number) => void) {
+  async scan(token: string, chatId: string, cursor: string | undefined, useModel: boolean, signal: AbortSignal, progress: (done: number, total: number, step?: 'read' | 'ai') => void) {
     if (useModel) this.scans.wakeModel();
     const names = await this.people(token, signal);
     const info = await this.slack.call<{ channel: unknown }>('conversations.info', token, { channel: chatId }, signal).catch(() => null);
@@ -125,7 +125,7 @@ export class SlackService {
       useModel,
       undefined,
       signal,
-      { prepared: true, label: `Slack: ${chat.kind === 'dm' ? 'direct message' : chat.name}`, progress: (step) => step === 'ai' && progress(Math.floor(read * 0.95), read) },
+      { prepared: true, label: `Slack: ${chat.kind === 'dm' ? 'direct message' : chat.name}`, progress: (step) => step === 'ai' && progress(read, read, 'ai') },
     )) as { findings: Array<{ hash: string; place: { file?: string; line?: number } }>; [key: string]: unknown };
 
     // Each finding names the chat, the person and the time instead of a piece and line. The overlap can find one key twice.

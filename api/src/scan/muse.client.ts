@@ -120,6 +120,8 @@ export class MuseClient {
   readonly sendsRaw: boolean;
   backoffMs = 500;
   private temperature = process.env.MUSE_TEMPERATURE === 'off' ? false : true;
+  // Turned off on its own if the server rejects the field.
+  private maxOutput = true;
   private readonly gate = new Gate(numberEnv('MUSE_MAX_CONCURRENT', 12));
   private readonly cap = new DailyCap(numberEnv('MUSE_DAILY_CALLS', 0), numberEnv('MUSE_DAILY_CALLS_PER_VISITOR', 0));
   private awakeAt = 0;
@@ -157,6 +159,14 @@ export class MuseClient {
     const text = clean.slice(0, MAX_READ_CHARS);
     if (text.length < 200 && REFUSAL.test(text)) return { status: 'error', error: 'The model refused to read the picture' };
     return { status: 'ok', text, ...(clean.length > MAX_READ_CHARS ? { cut: true } : {}) };
+  }
+
+  // One Ask AI answer: the prompt goes in as it is, the model's plain text comes back. The caller checks the text.
+  async ask(prompt: string, signal?: AbortSignal): Promise<{ status: 'ok'; text: string } | { status: 'unavailable' | 'timeout' | 'error' }> {
+    if (this.mode === 'mock') return { status: 'unavailable' };
+    // No token cap: the model thinks before it writes, and a cap on output ate the thinking and left no answer (seen 2026-11-04).
+    const out = await this.post(prompt, signal);
+    return out.status === 'ok' ? { status: 'ok', text: out.text } : { status: out.status };
   }
 
   // Call 1 and call 2 each judge every finding on their own, at the same time: call 2 never sees call 1's answer.
@@ -328,12 +338,12 @@ export class MuseClient {
     this.logger.warn(`model server did not wake within ${WAKE_MS / 60_000} minutes`);
   }
 
-  private async post(input: string | unknown[], signal?: AbortSignal): Promise<{ status: 'ok'; text: string; model: string } | { status: 'timeout' | 'error'; error: string; model: string }> {
+  private async post(input: string | unknown[], signal?: AbortSignal, maxTokens?: number): Promise<{ status: 'ok'; text: string; model: string } | { status: 'timeout' | 'error'; error: string; model: string }> {
     assertModelAllowed(this.model);
     await this.wake(signal);
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (signal?.aborted) return { status: 'error', error: 'Cancelled', model: this.model };
-      const body = JSON.stringify({ model: this.model, input, ...(this.temperature ? { temperature: 0 } : {}) });
+      const body = JSON.stringify({ model: this.model, input, ...(this.temperature ? { temperature: 0 } : {}), ...(maxTokens && this.maxOutput ? { max_output_tokens: maxTokens } : {}) });
       let response: Response;
       try {
         response = await this.gate.run(() =>
@@ -355,6 +365,11 @@ export class MuseClient {
       }
       if (response.status === 400 && this.temperature && (await response.clone().text().catch(() => '')).includes('temperature')) {
         this.temperature = false;
+        attempt--;
+        continue;
+      }
+      if (response.status === 400 && maxTokens && this.maxOutput && (await response.clone().text().catch(() => '')).includes('max_output_tokens')) {
+        this.maxOutput = false;
         attempt--;
         continue;
       }

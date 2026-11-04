@@ -146,10 +146,13 @@ export class GithubClient {
 
   // The newest merged pull requests, first page first, with a token only. Closed but unmerged pull requests are skipped.
   // Each page is one call, so 100 pull requests cost one call. The list stops at the wanted count or at an empty page.
-  async mergedPulls(owner: string, repo: string, wanted: number, signal: AbortSignal | undefined, token: string): Promise<number[]> {
+  // Only pull requests merged into one branch are listed: the branch in the link, such as development or staging,
+  // or else the repository's default branch, usually main. Without a known default branch, every merged pull request counts.
+  async mergedPulls(owner: string, repo: string, wanted: number, signal: AbortSignal | undefined, token: string, base?: string): Promise<number[]> {
+    if (!base) base = await this.defaultBranchName(owner, repo, signal, token);
     const numbers: number[] = [];
     for (let page = 1; numbers.length < wanted && page <= 50; page++) {
-      const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`;
+      const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}${base ? `&base=${encodeURIComponent(base)}` : ''}`;
       const response = await this.apiGet(url, 'application/vnd.github+json', signal, token);
       if (response.status !== 200) throw new BadGatewayException('GitHub did not answer as expected. Try again in a moment.');
       const data = (await response.json()) as Array<{ number?: unknown; merged_at?: unknown }>;
@@ -159,6 +162,14 @@ export class GithubClient {
       }
     }
     return numbers;
+  }
+
+  // The repository's default branch name from the API, or undefined when GitHub does not say.
+  private async defaultBranchName(owner: string, repo: string, signal: AbortSignal | undefined, token: string): Promise<string | undefined> {
+    const response = await this.apiGet(`https://api.github.com/repos/${owner}/${repo}`, 'application/vnd.github+json', signal, token);
+    if (response.status !== 200) return undefined;
+    const data = (await response.json().catch(() => null)) as { default_branch?: unknown } | null;
+    return typeof data?.default_branch === 'string' && data.default_branch ? data.default_branch : undefined;
   }
 
   // The added and removed lines of one pull request, as GitHub's patch text. Null when it is over 1 MB, so one huge pull request cannot fill the scan.

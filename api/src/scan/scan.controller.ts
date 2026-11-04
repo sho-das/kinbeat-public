@@ -10,7 +10,9 @@ import { parseRepoLink } from './repo/repo-rules';
 import { PR_HISTORY_MAX, PrHistoryService } from './repo/pr-history.service';
 import { PrHistoryJobs } from './repo/pr-history.job';
 import { ScanCancelled, ScanService } from './scan.service';
+import { AskService, AskSummary } from './ask.service';
 import { ScanProgress } from './progress';
+import { StatsService } from './stats.service';
 import { SiteScanService } from './site/site-scan.service';
 import { getTemplate, publicTemplate, TEMPLATES } from './templates';
 import { Unit } from './types';
@@ -77,11 +79,35 @@ export class ScanController {
     private readonly historyJobs: PrHistoryJobs,
     private readonly progress: ScanProgress,
     private readonly siteScan: SiteScanService,
+    private readonly askService: AskService,
+    private readonly stats: StatsService,
   ) {}
 
   @Get('health')
   health() {
     return { status: 'ok' };
+  }
+
+  // The home page's live numbers. Loading the page counts one session per visitor per day.
+  @Get('stats')
+  async liveStats(@Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone) {
+    res.setHeader('Cache-Control', 'no-store');
+    await this.stats.session(visitorKey(req));
+    return this.stats.read();
+  }
+
+  @Get('ask/status')
+  askStatus(@Res({ passthrough: true }) res: ClientGone) {
+    res.setHeader('Cache-Control', 'no-store');
+    return this.askService.status();
+  }
+
+  // Ask AI: a link or pasted text comes back as a scan for the page to start; a question gets the AI's checked answer.
+  @Post('ask')
+  @HttpCode(200)
+  ask(@Body() body: { message?: unknown; summary?: AskSummary }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone) {
+    res.setHeader('Cache-Control', 'no-store');
+    return this.askService.ask(body?.message, body?.summary, visitorKey(req), AbortSignal.any([leaves(res), AbortSignal.timeout(75_000)]));
   }
 
   @Get('templates')
@@ -100,6 +126,7 @@ export class ScanController {
   @UseGuards(ScanRateLimitGuard)
   @HttpCode(200)
   scan(@Body() body: { text?: unknown; templateId?: unknown; useModel?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone, @Headers('x-progress-id') progressId?: string) {
+    void this.stats.scan();
     const { text, templateId, useModel } = body ?? {};
     const signal = leaves(res);
     const progress = this.progress.reporter(visitorKey(req), progressId);
@@ -125,6 +152,7 @@ export class ScanController {
   @HttpCode(200)
   @UseInterceptors(FileInterceptor('file', { limits: { files: 1, fileSize: MAX_FILE_BYTES } }))
   scanFile(@UploadedFile() file: { originalname: string; buffer: Buffer } | undefined, @Body() body: { useModel?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone, @Headers('x-progress-id') progressId?: string) {
+    void this.stats.scan();
     const raw = body?.useModel;
     if (raw !== undefined && raw !== 'true' && raw !== 'false') {
       throw new BadRequestException('useModel must be true or false');
@@ -150,6 +178,7 @@ export class ScanController {
   @UseGuards(ScanRateLimitGuard, TokenScanRateLimitGuard, OneFileScanGuard)
   @HttpCode(200)
   scanRepo(@Body() body: { url?: unknown; useModel?: unknown; token?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone, @Headers('x-progress-id') progressId?: string) {
+    void this.stats.scan();
     const { url, useModel, token } = body ?? {};
     if (typeof url !== 'string' || !url.trim() || url.length > 300) throw new BadRequestException('Use a link like https://github.com/owner/repository.');
     if (useModel !== undefined && typeof useModel !== 'boolean') throw new BadRequestException('useModel must be true or false');
@@ -169,6 +198,7 @@ export class ScanController {
   @UseGuards(ScanRateLimitGuard, OneFileScanGuard)
   @HttpCode(200)
   scanSite(@Body() body: { url?: unknown; useModel?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone, @Headers('x-progress-id') progressId?: string) {
+    void this.stats.scan();
     const { url, useModel } = body ?? {};
     if (typeof url !== 'string' || !url.trim() || url.length > 300) throw new BadRequestException('Use a web address like https://example.com.');
     if (useModel !== undefined && typeof useModel !== 'boolean') throw new BadRequestException('useModel must be true or false');
@@ -183,6 +213,7 @@ export class ScanController {
   @UseGuards(ScanRateLimitGuard, TokenScanRateLimitGuard)
   @HttpCode(202)
   async startHistory(@Body() body: { url?: unknown; token?: unknown; useModel?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone) {
+    void this.stats.scan();
     const { url, token, useModel } = body ?? {};
     const link = typeof url === 'string' && url.length <= 300 ? parseRepoLink(url) : null;
     if (!link) throw new BadRequestException('Use a link like https://github.com/owner/repository.');
@@ -191,9 +222,10 @@ export class ScanController {
     const privateToken = token.trim();
     res.setHeader('Cache-Control', 'no-store');
     const job = this.historyJobs.start(visitorKey(req), privateToken, (progress, signal) =>
-      this.prHistory.scan(link.owner, link.repo, PR_HISTORY_MAX, AbortSignal.any([signal, AbortSignal.timeout(30 * 60 * 1000)]), privateToken, useModel ?? true, progress),
+      // A branch in the link, such as /tree/development, limits the list to pull requests merged into that branch.
+      this.prHistory.scan(link.owner, link.repo, PR_HISTORY_MAX, AbortSignal.any([signal, AbortSignal.timeout(30 * 60 * 1000)]), privateToken, useModel ?? true, progress, link.refPath ?? undefined),
     );
-    return { id: job.id, state: job.state, done: job.done, total: job.total };
+    return { id: job.id, state: job.state, done: job.done, total: job.total, step: job.step };
   }
 
   // The step a running scan is at, for the page to show while it waits. Only the visitor who started the scan can read it.
@@ -224,6 +256,7 @@ export class ScanController {
       state: job.state,
       done: job.done,
       total: job.total,
+      step: job.step,
       ...(job.state === 'done' ? { result: job.result } : {}),
       ...(job.state === 'failed' ? { error: job.error } : {}),
     };
