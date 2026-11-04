@@ -3,7 +3,6 @@
 import { DriveMark, SlackMark } from "./Marks";
 import { useEffect, useRef, useState } from "react";
 import { content } from "../content";
-import { browserStore, inputKey, readSaved, save, cacheable } from "../lib/cache";
 import { driveFile, driveReady, pickDriveFile, revokeDrive } from "../lib/drive";
 import type { DriveDoc } from "../lib/drive-files";
 import { fileProblem, hiddenFromPage, notChecked, placeLabel, repoProblem, typeLabel, verdictKind, type ScanResult, type Template } from "../lib/scan";
@@ -623,18 +622,7 @@ export function Scanner() {
         .catch(() => {});
     }, 1500);
     try {
-      // A repository result is saved on the server and checked against the latest commit, so the browser keeps no copy of it.
-      // Only pasted text and uploaded files are kept in this browser. Samples always scan fresh, so visitors see the real calls.
-      const kept = mode === "paste" || mode === "files";
-      const key = kept ? await inputKey(mode === "paste" ? { text } : { file }) : "";
-      const store = kept ? browserStore() : null;
-      const saved = store ? readSaved(store, key, Date.now()) : null;
-      if (saved) {
-        setSource(mode === "paste" ? "Pasted text" : (file?.name ?? ""));
-        setResult(saved.result);
-        setDirty(false);
-        return;
-      }
+      // Nothing is kept in the browser: every scan runs live, so visitors always see the real calls.
       const sweep = new Promise((done) => setTimeout(done, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 1150));
       let response: Response;
       let label: string;
@@ -705,7 +693,6 @@ export function Scanner() {
       setSource(label);
       setResult(data as ScanResult);
       setDirty(false);
-      if (store && cacheable(data as ScanResult)) save(store, key, data as ScanResult, Date.now());
     } catch (e) {
       // Cancel is the visitor's choice, so it shows no error.
       if ((e as Error).name === "AbortError") {
