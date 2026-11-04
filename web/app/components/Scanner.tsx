@@ -7,7 +7,6 @@ import { browserStore, inputKey, readSaved, save, cacheable } from "../lib/cache
 import { driveFile, driveReady, pickDriveFile, revokeDrive } from "../lib/drive";
 import type { DriveDoc } from "../lib/drive-files";
 import { fileProblem, hiddenFromPage, notChecked, placeLabel, repoProblem, typeLabel, verdictKind, type ScanResult, type Template } from "../lib/scan";
-import { ConfirmDialog } from "./ConfirmDialog";
 import { FindingDetail } from "./Findings";
 import { Select } from "./Select";
 
@@ -43,11 +42,9 @@ const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matche
 
 const NO_API = "The scanner is not reachable right now. Try again in a moment.";
 
-type Mode = "sample" | "paste" | "files" | "drive" | "slack" | "site" | "repo" | "history";
-// The buttons under the Ask box. Each opens its picker straight away: the file dialog, Google's picker, or Slack's permission page.
+type Mode = "paste" | "files" | "drive" | "slack" | "site" | "repo" | "history";
 // The + menu next to the box: a file from this computer, Google Drive, or Slack.
 const PLUS: Mode[] = ["files", "drive", "slack"];
-// With KinBeat AI out of budget the chat cannot offer Drive and Slack, so their picks sit under the box.
 // The steps each kind of scan goes through, in the order the server reports them (R.steps).
 const STEP_ORDER: Partial<Record<Mode, Array<keyof typeof content.right.steps>>> & { paste: Array<keyof typeof content.right.steps> } = {
   repo: ["download", "files", "pictures", "ai"],
@@ -66,10 +63,9 @@ const CHIP_ICONS: Partial<Record<Mode, React.ReactNode>> = {
 type SlackChat = { id: string; name: string; kind: keyof typeof L.slackGroups };
 
 export function Scanner() {
-  // The window opens with only the box: pasted text, a link or a question. The chips open the other scans.
+  // The window opens with only the box: pasted text, a link or a question. The + menu opens the other scans.
   const [mode, setMode] = useState<Mode>("paste");
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [selected, setSelected] = useState("");
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   // The Google Drive file picked for one scan, and Google's short-lived token to download it. Both are cleared when the scan ends or the tab changes.
@@ -121,8 +117,6 @@ export function Scanner() {
   // The id of a PR history or Slack scan running on the server, so Cancel can stop it there too.
   const serverJob = useRef<string | null>(null);
   // A tab clicked while a scan runs. The popup asks first. The switch happens only after the scan has fully stopped.
-  const [askMode, setAskMode] = useState<Mode | null>(null);
-  const switchTo = useRef<Mode | null>(null);
   // Ask AI: the conversation under the panes, the box's text, and a scan the box asked for, started once its tab is set.
   type Pick = "files" | "drive" | "slack";
   // ask: a question KinBeat AI puts with buttons (public or private?) or a token ask with the help links.
@@ -189,7 +183,6 @@ export function Scanner() {
             })),
         );
         setTemplates(chosen);
-        if (chosen.length) setSelected(chosen[0].id);
       })
       .catch(() => setError(NO_API));
   }, []);
@@ -237,10 +230,9 @@ export function Scanner() {
   // Once the input changes, the button says Scan again no more.
   useEffect(() => {
     setDirty(true);
-  }, [mode, selected, text, file, repo, site, driveDoc, slackChat]);
+  }, [mode, text, file, repo, site, driveDoc, slackChat]);
 
-  const template = templates.find((t) => t.id === selected);
-  const ready = mode === "sample" ? !!template : mode === "paste" ? !!text.trim() : mode === "repo" ? !!repo.trim() : mode === "site" ? !!site.trim() : mode === "history" ? !!repo.trim() && !!token.trim() : mode === "drive" ? !!driveDoc : mode === "slack" ? !!slackChat : !!file;
+  const ready = mode === "paste" ? !!text.trim() : mode === "repo" ? !!repo.trim() : mode === "site" ? !!site.trim() : mode === "history" ? !!repo.trim() && !!token.trim() : mode === "drive" ? !!driveDoc : mode === "slack" ? !!slackChat : !!file;
 
   function changeMode(next: Mode) {
     setMode(next);
@@ -314,18 +306,6 @@ export function Scanner() {
     stop.current?.abort();
     setCancelled(true);
   }
-
-  // Runs after each scan ends. A chosen tab is switched to only now, when the scan's own clean-up is done.
-  // If the scan ended by itself while the popup was open, the popup closes and the old choice is dropped.
-  useEffect(() => {
-    if (busy) return;
-    if (switchTo.current) {
-      const next = switchTo.current;
-      switchTo.current = null;
-      changeMode(next);
-    }
-    setAskMode(null);
-  }, [busy]);
 
   // A scan the Ask box routed: the tab and its input are set in the same render, so run() sees them here.
   useEffect(() => {
@@ -639,15 +619,7 @@ export function Scanner() {
       const sweep = new Promise((done) => setTimeout(done, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 1150));
       let response: Response;
       let label: string;
-      if (mode === "sample" && template) {
-        label = template.title;
-        response = await fetch("/api/scan", {
-          method: "POST",
-          headers: { "content-type": "application/json", ...progressHeader },
-          body: JSON.stringify({ templateId: template.id, useModel: true }),
-          signal,
-        });
-      } else if (mode === "paste") {
+      if (mode === "paste") {
         label = "Pasted text";
         response = await fetch("/api/scan", {
           method: "POST",
@@ -754,8 +726,6 @@ export function Scanner() {
   const scanAt = counted ? (progress?.step === "ai" ? 1 : 0) : Math.max(0, step ? order.indexOf(step.step) : 0);
   const within = counted ? (progress?.step === "ai" ? 0.5 : progress?.total ? progress.done / progress.total : 0) : step?.total ? (step.done ?? 0) / step.total : 0;
   const scanPercent = Math.min(99, Math.round(((scanAt + within) / scanRows.length) * 100));
-  // Only Slack (pick a chat) and PR history (paste a token) need inputs above the box. The rest start from the box or a button.
-  const showPanel = mode === "history";
   // Slack's chat pick and every scan's progress live in the chat, as bubbles from KinBeat AI written by code.
   const slackPick = mode === "slack" && !!slack;
   // The Ask box is off while a Slack chat is being picked and while a scan runs.
@@ -820,104 +790,9 @@ export function Scanner() {
 
   return (
     <div className="consolewrap">
-      <ConfirmDialog
-        open={askMode !== null}
-        message={L.switchBody}
-        confirmLabel={L.stopAndSwitch}
-        cancelLabel={L.keepScanning}
-        onConfirm={() => {
-          switchTo.current = askMode;
-          setAskMode(null);
-          cancelScan();
-        }}
-        onCancel={() => setAskMode(null)}
-      />
       {/* A chat window: the scan's inputs, the progress, the results and the AI's answers sit above the one box.
-        The box scans a link or pasted text, or asks KinBeat AI. The buttons under it open a file, Google Drive or Slack straight away. */}
+        The box scans a link or pasted text, or asks KinBeat AI. The + menu next to it opens a file, Google Drive or Slack. */}
       <section className="scanbox" aria-label="Scan and results">
-        <div className="pane">
-          {showPanel && (
-            <div className="srcpanel" id="srcpanel">
-              {mode === "history" && (
-                <div className="field">
-                  <label className="lbl" htmlFor="repolink">
-                    {L.repoLabel}
-                  </label>
-                  <input
-                    id="repolink"
-                    className="repoinput"
-                    type="url"
-                    inputMode="url"
-                    autoComplete="off"
-                    spellCheck={false}
-                    value={repo}
-                    placeholder={L.repoPlaceholder}
-                    readOnly={busy}
-                    onChange={(e) => {
-                      setRepo(e.target.value);
-                      setError("");
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && ready && !busy) run();
-                    }}
-                  />
-                  <div id="repotoken-box" className="tokenbox">
-                    <label className="lbl" htmlFor="repotoken">
-                      {L.tokenLabel}
-                    </label>
-                    <input
-                      id="repotoken"
-                      className="repoinput"
-                      type="password"
-                      autoComplete="new-password"
-                      autoCapitalize="off"
-                      spellCheck={false}
-                      value={token}
-                      readOnly={busy}
-                      aria-describedby="repotoken-hint"
-                      onChange={(e) => {
-                        setToken(e.target.value);
-                        setError("");
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && ready && !busy) run();
-                      }}
-                    />
-                    <p className="dz-hint repohint" id="repotoken-hint">
-                      {L.tokenHintStart}{" "}
-                      <a href={L.tokenHelpUrl} target="_blank" rel="noopener noreferrer">
-                        {L.tokenLink}
-                      </a>{" "}
-                      {L.tokenHintEnd}{" "}
-                      <button type="button" className="linkbtn" aria-expanded={tokenSteps} aria-controls="token-steps" onClick={() => setTokenSteps(!tokenSteps)}>
-                        {tokenSteps ? L.tokenLess : L.tokenMore}
-                      </button>
-                    </p>
-                    {tokenSteps && (
-                      <div id="token-steps" className="tokensteps">
-                        <p className="tokensteps__title">{L.tokenStepsTitle}</p>
-                        <ol>
-                          {L.prTokenSteps.map((step) => (
-                            <li key={step}>{step}</li>
-                          ))}
-                        </ol>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {showPanel && !busy && (
-            <div className="ctrl bigscan">
-              <button className="btn" type="button" disabled={!ready} onClick={() => run()}>
-                {result && !dirty ? L.scanAgain : L.scan}
-              </button>
-            </div>
-          )}
-          {mode === "history" && <p className="dz-hint repohint">{L.prNote}</p>}
-        </div>
         <div className="chat__ask">
           {(chat.length > 0 || asking || busy || slackPick || (result && !busy)) && (
             <ol ref={chatLog} className="chat__log" aria-live="polite">
@@ -1056,7 +931,7 @@ export function Scanner() {
                   {m.ask === "token" && (
                     <div className="chat__form">
                       <p className="chat__hint">
-                        <a href={L.repoTokenHelpUrl} target="_blank" rel="noopener noreferrer">
+                        <a href={m.tokenFor === "history" ? L.tokenHelpUrl : L.repoTokenHelpUrl} target="_blank" rel="noopener noreferrer">
                           {L.tokenLink}
                         </a>{" "}
                         {L.tokenHintEnd}{" "}
@@ -1120,7 +995,7 @@ export function Scanner() {
               {slackPick && slack && (
                 <li className="chat__msg ai chat__panel">
                   <span className="chat__who">{A.aiName}</span>
-                  {A.slackPick}
+                  <span id="slack-l">{A.slackPick}</span>
                   <div className="chat__form">
                     <Select
                       labelledBy="slack-l"

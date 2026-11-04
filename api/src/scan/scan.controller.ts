@@ -1,10 +1,11 @@
-import { ArgumentsHost, BadRequestException, Body, Catch, Delete, ExceptionFilter, Controller, Get, Headers, HttpCode, NotFoundException, Param, Post, Req, RequestTimeoutException, Res, UploadedFile, UseFilters, UseGuards, UseInterceptors } from '@nestjs/common';
+import { ArgumentsHost, BadRequestException, Body, Catch, Delete, ExceptionFilter, Controller, ForbiddenException, Get, Headers, HttpCode, NotFoundException, Param, Post, Req, RequestTimeoutException, Res, UploadedFile, UseFilters, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Public } from '../auth/public';
 import { visitorKey } from '../security/client-ip';
 import { OneFileScanGuard, ScanRateLimitGuard, TokenScanRateLimitGuard } from '../security/rate-limit';
 import { MAX_FILE_BYTES } from './extract/extractor.service';
 import { positiveEnv } from './limits';
+import { GithubClient, NOT_YOURS } from './repo/github.client';
 import { RepoScanService } from './repo/repo-scan.service';
 import { parseRepoLink } from './repo/repo-rules';
 import { PR_HISTORY_MAX, PrHistoryService } from './repo/pr-history.service';
@@ -81,6 +82,7 @@ export class ScanController {
     private readonly siteScan: SiteScanService,
     private readonly askService: AskService,
     private readonly stats: StatsService,
+    private readonly github: GithubClient,
   ) {}
 
   @Get('health')
@@ -188,9 +190,10 @@ export class ScanController {
       privateToken = token.trim();
       res.setHeader('Cache-Control', 'no-store');
     }
-    return timed(res, 'This repository took too long to scan, so the scan was stopped.', (signal) =>
-      this.repoScan.scan(url, useModel ?? true, visitorKey(req), signal, privateToken, this.progress.reporter(visitorKey(req), progressId)),
-    );
+    return timed(res, 'This repository took too long to scan, so the scan was stopped.', async (signal) => {
+      if (privateToken) await this.mustOwn(url, signal, privateToken);
+      return this.repoScan.scan(url, useModel ?? true, visitorKey(req), signal, privateToken, this.progress.reporter(visitorKey(req), progressId));
+    });
   }
 
   // One public web page and the script files it loads. Private and local addresses are refused - see site/safe-fetch.ts.
@@ -221,11 +224,21 @@ export class ScanController {
     if (useModel !== undefined && typeof useModel !== 'boolean') throw new BadRequestException('useModel must be true or false');
     const privateToken = token.trim();
     res.setHeader('Cache-Control', 'no-store');
+    await this.mustOwn(url as string, undefined, privateToken);
     const job = this.historyJobs.start(visitorKey(req), privateToken, (progress, signal) =>
       // A branch in the link, such as /tree/development, limits the list to pull requests merged into that branch.
       this.prHistory.scan(link.owner, link.repo, PR_HISTORY_MAX, AbortSignal.any([signal, AbortSignal.timeout(30 * 60 * 1000)]), privateToken, useModel ?? true, progress, link.refPath ?? undefined),
     );
     return { id: job.id, state: job.state, done: job.done, total: job.total, step: job.step };
+  }
+
+  // A token only unlocks a repository the visitor can write to. A public repository of someone else is refused with the token,
+  // so nobody can use KinBeat with their own token to read another person's findings. A private repository that opens is theirs.
+  private async mustOwn(url: string, signal: AbortSignal | undefined, token: string): Promise<void> {
+    const link = parseRepoLink(url);
+    if (!link) throw new BadRequestException('Use a link like https://github.com/owner/repository.');
+    const access = await this.github.access(link.owner, link.repo, signal, token);
+    if (!access.private && !access.writer) throw new ForbiddenException(NOT_YOURS);
   }
 
   // The step a running scan is at, for the page to show while it waits. Only the visitor who started the scan can read it.

@@ -41,23 +41,7 @@ export default function Home() {
           <div className="wrap hero__copy">
             <h1>
               <span className="w w1">{C.headline[0]}</span>
-              <span className="w w2">
-                {C.headline[1]}
-              </span>
-              <span className="w w3">
-                {C.headline[2].split(/(hackers do\.?)/i).map((part, i) =>
-                  /^hackers do/i.test(part) ? (
-                    <em key={i} className="glow">
-                      {part}
-                      <svg viewBox="0 0 300 24" preserveAspectRatio="none" aria-hidden="true">
-                        <path pathLength={1} d="M3 15 C 60 4, 120 22, 180 9 S 270 6, 297 14" />
-                      </svg>
-                    </em>
-                  ) : (
-                    part
-                  ),
-                )}
-              </span>
+              <span className="w w3">{C.headline[1]}</span>
             </h1>
             <p className="lede">{C.lead}</p>
             <div className="cta">

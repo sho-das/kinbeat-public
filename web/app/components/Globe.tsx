@@ -11,12 +11,12 @@ const NAVY = "246,241,231";
 const INK = "#F6F1E7";
 const FADE_IN_MS = 1600;
 const FLIGHT_MS = 3800;
-const MAX_FLIGHTS = 28;
+const MAX_FLIGHTS = 10;
 // Phones show only this many keys and tokens at once, so the small globe does not look crowded.
 const MAX_FLIGHTS_PHONE = 3;
 // The earth makes one turn in this time. START_LON is the longitude in the middle at the start; TILT leans the north towards the viewer (radians).
 const TURN_MS = 90000;
-const START_LON = 45;
+const START_LON = 15;
 const TILT = 0.5;
 
 const CITIES: Array<{ name: string; lon: number; lat: number }> = [
@@ -54,6 +54,8 @@ const CITIES: Array<{ name: string; lon: number; lat: number }> = [
   { name: "TORONTO", lon: -79.4, lat: 43.65 },
   { name: "MEXICO CITY", lon: -99.1, lat: 19.43 },
   { name: "LOS ANGELES", lon: -118.2, lat: 34.05 },
+  { name: "VANCOUVER", lon: -123.1, lat: 49.28 },
+  { name: "MONTREAL", lon: -73.57, lat: 45.5 },
   { name: "SAO PAULO", lon: -46.6, lat: -23.5 },
   { name: "BUENOS AIRES", lon: -58.4, lat: -34.6 },
   { name: "JOHANNESBURG", lon: 28.05, lat: -26.2 },
@@ -109,9 +111,9 @@ function unit(lon: number, lat: number): Vec {
 
 // Turns a point on the earth into screen units (x right, y up, z towards the viewer). The earth turns on its own
 // north-south axis, west to east, like a real globe. The north leans a little towards the viewer.
-function makeView() {
-  const ct = Math.cos(TILT);
-  const st = Math.sin(TILT);
+function makeView(tilt = TILT) {
+  const ct = Math.cos(tilt);
+  const st = Math.sin(tilt);
   return (p: Vec, spin: number): Vec => {
     const turn = spin - rad(START_LON);
     const x1 = p[0] * Math.cos(turn) - p[1] * Math.sin(turn);
@@ -143,6 +145,9 @@ function drawKey(g: CanvasRenderingContext2D, x: number, y: number, size: number
 }
 
 // What a flight carries. Each flight keeps one kind for its whole trip.
+// The UK, Europe, the USA, Canada and India come first: most token travels start in one of these.
+const PRIORITY = (c: { lon: number; lat: number }): boolean =>
+  (c.lon > -130 && c.lon < -50 && c.lat > 24) || (c.lon > -11 && c.lon < 40 && c.lat > 35 && c.lat < 65) || (c.lon > 68 && c.lon < 92 && c.lat > 6 && c.lat < 35);
 const PAYLOADS = ["key", "hash", "stars", "ghp_••••", "AKIA••••", "eyJ••••", "sk-••••", "pwd: ••••"];
 
 function drawSymbol(g: CanvasRenderingContext2D, kind: number, x: number, y: number, size: number) {
@@ -186,7 +191,9 @@ export function Globe() {
       for (let i = 0; i < flat.length; i += 2) out.push(unit(flat[i] / 10, flat[i + 1] / 10));
       return out;
     });
-    const view = makeView();
+    // The page may lean the globe differently (--globe-tilt, radians; negative leans the north away, so the top of the arc shows the cities).
+    const tiltValue = parseFloat(getComputedStyle(el).getPropertyValue("--globe-tilt"));
+    const view = makeView(Number.isFinite(tiltValue) ? tiltValue : TILT);
     const spots = CITIES.map((c) => unit(c.lon, c.lat));
     // Grid lines every 15 degrees.
     const lines: Vec[][] = [];
@@ -215,9 +222,15 @@ export function Globe() {
     const draw = (now: number) => {
       // Phones: the globe sits to the right, above the headline, and does not turn.
       const wide = !phone();
-      const radius = wide ? Math.min(width * 0.36, height * 0.8) : Math.min(width, height) * 0.46;
-      const cx = wide ? width * 0.7 : width * 0.6;
-      const cy = wide ? height * 0.52 : height * 0.5;
+      // The page's CSS may place the globe inside its box (--globe-cx, --globe-cy, --globe-r as fractions of the box); these are the defaults.
+      const style = getComputedStyle(el);
+      const frac = (name: string, fallback: number) => {
+        const v = parseFloat(style.getPropertyValue(name));
+        return Number.isFinite(v) ? v : fallback;
+      };
+      const radius = wide ? Math.min(width * frac("--globe-r", 0.36), height * 0.8) : Math.min(width, height) * frac("--globe-r", 0.46);
+      const cx = width * frac("--globe-cx", wide ? 0.7 : 0.6);
+      const cy = height * frac("--globe-cy", wide ? 0.52 : 0.5);
       const strength = wide ? 1 : 0.55;
       const at = (p: Vec): [number, number] => [cx + p[0] * radius, cy - p[1] * radius];
       g.clearRect(0, 0, width, height);
@@ -351,7 +364,9 @@ export function Globe() {
         return p[2] > 0.25 && (!phone() || p[1] > 0.15);
       });
       if (shown.length < 2) return;
-      const from = shown[Math.floor(Math.random() * shown.length)];
+      const first = shown.filter((i) => PRIORITY(CITIES[i]));
+      const pool = first.length > 0 && Math.random() < 0.85 ? first : shown;
+      const from = pool[Math.floor(Math.random() * pool.length)];
       const near = shown.filter((i) => i !== from && dot(spots[from], spots[i]) < 0.995 && dot(spots[from], spots[i]) > 0.1);
       if (near.length === 0) return;
       flights.push({ from, to: near[Math.floor(Math.random() * near.length)], born: now, kind: Math.floor(Math.random() * PAYLOADS.length) });
@@ -364,7 +379,7 @@ export function Globe() {
       spin = t > 0 && !phone() ? (2 * Math.PI * t) / TURN_MS : 0;
       if (t > 0) {
         flights = flights.filter((f) => now - f.born < FLIGHT_MS);
-        if (flights.length < (phone() ? MAX_FLIGHTS_PHONE : MAX_FLIGHTS) && Math.random() < 0.15) newFlight(now);
+        if (flights.length < (phone() ? MAX_FLIGHTS_PHONE : MAX_FLIGHTS) && Math.random() < 0.07) newFlight(now);
       }
       draw(now);
     };

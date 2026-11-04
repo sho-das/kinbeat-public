@@ -15,6 +15,8 @@ const SHA = /^[0-9a-f]{40}$/;
 const NOT_FOUND = 'Repository not found, or it is not public.';
 // One answer for a wrong token, a token without access and a missing repository, so a private repository cannot be told apart.
 export const NO_ACCESS = "We could not open that repository with this token. Check the link and the token's access.";
+// A token on a public repository the visitor cannot write to: the findings stay hidden, so a token cannot be used to raid someone else's code.
+export const NOT_YOURS = 'That token does not belong to an owner of this repository. A public repository you do not own is scanned without a token and shows the counts only.';
 export const TOKEN_BUSY = 'GitHub is busy. Try again in a minute.';
 const HEADERS = { 'user-agent': 'KinBeat-repo-scan' };
 
@@ -162,6 +164,16 @@ export class GithubClient {
       }
     }
     return numbers;
+  }
+
+  // Whether the token holder may write to the repository (owner, admin, maintainer or pusher), and whether it is private.
+  // A public repository only shows its findings to someone who can write to it. A private one is theirs by the fact the token opens it.
+  async access(owner: string, repo: string, signal: AbortSignal | undefined, token: string): Promise<{ private: boolean; writer: boolean }> {
+    const response = await this.apiGet(`https://api.github.com/repos/${owner}/${repo}`, 'application/vnd.github+json', signal, token);
+    if (response.status !== 200) throw new NotFoundException(NO_ACCESS);
+    const data = (await response.json().catch(() => null)) as { private?: unknown; permissions?: { admin?: unknown; maintain?: unknown; push?: unknown } } | null;
+    const p = data?.permissions ?? {};
+    return { private: data?.private === true, writer: p.admin === true || p.maintain === true || p.push === true };
   }
 
   // The repository's default branch name from the API, or undefined when GitHub does not say.

@@ -3,20 +3,14 @@ export const content = {
   nav: [
     { label: "Questions", href: "#faq" },
   ],
-  contactEmail: "contact@kinbeat.com",
-  headline: ["Find your", "exposed tokens", "before hackers do."],
+  headline: ["Find your exposed tokens", "before hackers do."],
   lead: "Billions of credentials leak every year from documents, GitHub and every machine identity.",
-  cta: { primary: "Get a free scan", nav: "Contact us", navHref: "#contact" },
+  cta: { primary: "Get a free scan", nav: "Contact us" },
   left: {
     modes: [
-      { id: "sample", label: "Try a sample" },
-      { id: "paste", label: "Paste a chat" },
       { id: "files", label: "Upload a file" },
       { id: "drive", label: "Google Drive" },
       { id: "slack", label: "Slack" },
-      { id: "site", label: "Website" },
-      { id: "repo", label: "GitHub repository" },
-      { id: "history", label: "GitHub PR history" },
     ],
     // The samples shown on the page, in this order. The API keeps more samples for tests and evals.
     samples: [
@@ -26,9 +20,6 @@ export const content = {
     ],
     choose: "Choose a file",
     driveOff: "Google Drive is not set up yet.",
-    slackConnect: "Connect Slack",
-    slackHint: "Scan all your public and private chats for free.",
-    slackPick: "Slack chat to scan",
     slackGroups: { public: "Public channels", private: "Private channels", group: "Group messages", dm: "Direct messages" },
     slackDisconnect: "Disconnect Slack",
     slackDenied: "Slack did not connect. If your Slack admin must approve apps, ask them first. You can also upload a Slack export zip in Upload a file.",
@@ -38,10 +29,6 @@ export const content = {
     slackRange: "Messages {from} to {to} scanned. Scan next reads {next} to {last}.",
     slackScanNext: "Scan next",
     slackMessages: "messages {from} to {to}",
-    repoLabel: "Link to a GitHub repository",
-    repoPlaceholder: "https://github.com/owner/repository",
-    tokenLabel: "Paste your GitHub token",
-    tokenHintStart: "KinBeat needs a read-only access token to read your pull request history. For your security, the token is used for this scan only and never stored.",
     tokenLink: "Watch the video",
     tokenHintEnd: "on how to create one, or",
     // Our own unlisted videos (2026-11-04): the PR history token, and the private repository token.
@@ -50,10 +37,6 @@ export const content = {
     tokenMore: "read the steps",
     tokenStepsTitle: "To create a read-only access token",
     tokenLess: "Show less",
-    prNote: "Reads up to 100 pull requests for free.",
-    switchBody: "The scan is in progress. Switching will stop it.",
-    stopAndSwitch: "Stop and switch",
-    keepScanning: "Keep scanning",
     // For a private repository scan: the same token, with Contents read access instead of Pull requests.
     repoTokenSteps: [
       "On GitHub, click your profile picture at the top right, then Settings, Developer settings, Personal access tokens, Fine-grained tokens, and press Generate new token.",
@@ -65,7 +48,6 @@ export const content = {
       "Give it a name and an expiry of 30 to 90 days. Under Repository access, choose Only select repositories and pick the one to scan.",
       "Under Repository permissions, set Pull requests to Read-only. Then generate the token and copy it here.",
     ],
-    remove: "Remove",
     scan: "Scan",
     cancel: "Cancel",
     badAnswer: "The server sent an unexpected answer. Try again.",
@@ -216,12 +198,12 @@ export const content = {
       {
         q: "How do I scan a GitHub repository?",
         a: "You can scan a public repository by pasting the link in the chat directly. Public repositories which you don't own get only the count of exposed secrets, to avoid exploitation. If you own the repository, or if it is private, you can share a read access token and we will show each result in the chat. The token is never saved and expires right after access. Watch {video} to see how.",
-        video: "https://youtu.be/Jzps1ccfwf0",
+        video: "https://youtu.be/ZemkGAZ2gd8",
       },
       {
         q: "Can I scan my pull request history?",
         a: "Yes. You can scan up to 100 merged pull requests on a specific branch, or on the default branch when the link names none. We need a read access token to confirm your identity. Check {video} to see how to create one. These tokens are not stored anywhere on our platform, to maintain privacy. Public repositories which you don't own get only the count of exposed secrets, to avoid exploitation.",
-        video: "https://youtu.be/ZemkGAZ2gd8",
+        video: "https://youtu.be/Jzps1ccfwf0",
       },
       // Approved 2026-11-04. 10,000 is SLACK_SCAN_MESSAGES and 10 minutes is SLACK_SESSION_MINUTES in the API.
       { q: "Can I scan my Slack chats?", a: "Press + in the chat box, choose Slack, connect your workspace and pick a channel. KinBeat reads up to 10,000 messages per scan and keeps no copy. The connection expires after 10 minutes without use, and you can disconnect at any time." },
