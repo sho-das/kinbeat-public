@@ -146,10 +146,13 @@ export function readTag(raw: string): { text: string; action?: 'repo' | 'history
   return found ? { text, action: found[1].toLowerCase() as 'repo' | 'history' | 'site' } : { text };
 }
 
-export function buildAskPrompt(question: string, summary: AskSummary | undefined): string {
+// pending: what the page is waiting for. 'history': KinBeat AI just asked for a repository link for a pull request history scan.
+export type AskPending = 'history';
+export function buildAskPrompt(question: string, summary: AskSummary | undefined, pending?: AskPending): string {
   // < and > are escaped so neither the question nor the summary can close a <<< >>> block.
   const data = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
-  return [INSTRUCTION, '', 'Scan summary (data):', `<<<${data(cleanSummary(summary))}>>>`, 'Question (data):', `<<<${data(question)}>>>`].join('\n');
+  const context = pending === 'history' ? ['Context: you just asked the visitor for a repository link to scan its pull request history. A message with a repository link is that link, whatever words come with it; answer with the [HISTORY] tag.', ''] : [];
+  return [INSTRUCTION, '', ...context, 'Scan summary (data):', `<<<${data(cleanSummary(summary))}>>>`, 'Question (data):', `<<<${data(question)}>>>`].join('\n');
 }
 
 @Injectable()
@@ -170,7 +173,7 @@ export class AskService {
 
   constructor(private readonly muse: MuseClient) {}
 
-  async ask(message: unknown, summary: AskSummary | undefined, owner: string, signal?: AbortSignal): Promise<AskReply> {
+  async ask(message: unknown, summary: AskSummary | undefined, owner: string, signal?: AbortSignal, pending?: AskPending): Promise<AskReply> {
     const text = typeof message === 'string' ? message.normalize('NFKC').replace(/[\u200b-\u200d\u2060\ufeff]/g, '').trim().slice(0, MAX_QUESTION) : '';
     if (!text) return { kind: 'answer', text: ASK_LINES.fallback };
     if (!this.burst.hit(owner).allowed || !this.minute.hit(owner).allowed) return { kind: 'answer', text: ASK_LINES.slowDown };
@@ -186,7 +189,7 @@ export class AskService {
       return { kind: 'answer', text: ASK_LINES.fallback };
     }
     const started = Date.now();
-    const out = await this.muse.ask(buildAskPrompt(text, summary), signal);
+    const out = await this.muse.ask(buildAskPrompt(text, summary, pending), signal);
     this.budget.spend(Date.now() - started);
     // The off-topic marker becomes the fixed line, so the wording never drifts and no words are generated for it.
     const tagged = out.status === 'ok' ? readTag(out.text) : { text: '' };

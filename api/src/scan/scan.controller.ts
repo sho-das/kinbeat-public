@@ -107,9 +107,10 @@ export class ScanController {
   // Ask AI: a link or pasted text comes back as a scan for the page to start; a question gets the AI's checked answer.
   @Post('ask')
   @HttpCode(200)
-  ask(@Body() body: { message?: unknown; summary?: AskSummary }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone) {
+  ask(@Body() body: { message?: unknown; summary?: AskSummary; pending?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone) {
     res.setHeader('Cache-Control', 'no-store');
-    return this.askService.ask(body?.message, body?.summary, visitorKey(req), AbortSignal.any([leaves(res), AbortSignal.timeout(75_000)]));
+    const pending = body?.pending === 'history' ? 'history' : undefined;
+    return this.askService.ask(body?.message, body?.summary, visitorKey(req), AbortSignal.any([leaves(res), AbortSignal.timeout(75_000)]), pending);
   }
 
   @Get('templates')

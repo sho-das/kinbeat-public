@@ -388,7 +388,8 @@ export function Scanner() {
     if (awaitToken) {
       if (busy || scanWithToken(message)) return;
     }
-    if (awaitHistoryRepo) {
+    // Waiting for the history link: a bare link is taken as it is; words with it go to the AI, which reads them.
+    if (awaitHistoryRepo && !/\s/.test(message)) {
       takeHistoryRepo(message);
       return;
     }
@@ -439,7 +440,7 @@ export function Scanner() {
       const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message, summary }),
+        body: JSON.stringify({ message, summary, ...(awaitHistoryRepo ? { pending: "history" } : {}) }),
       });
       const reply = response.ok ? await response.json() : null;
       if (reply?.kind === "scan") {
@@ -458,7 +459,8 @@ export function Scanner() {
       const link = typeof reply?.link === "string" ? reply.link : "";
       if (reply?.text && !reply.retry && !tagged) answered.current.set(key, answer);
       if (tagged === "history" && link) {
-        setChat((c) => [...c, { who: "ai", ...answer }, { who: "ai", text: A.historyToken, ask: "token", tokenFor: "history" }]);
+        setAwaitHistoryRepo(false);
+        setChat((c) => [...c.map((m) => (m.ask === "historyRepo" ? { ...m, ask: undefined } : m)), { who: "ai", ...answer }, { who: "ai", text: A.historyToken, ask: "token", tokenFor: "history" }]);
         pendingRepo.current = link;
         tokenFor.current = "history";
         return;
