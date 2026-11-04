@@ -246,7 +246,7 @@ export const content = {
     sinceTitle: "Since going live",
     // Added to the live scan count: the scans the owner ran by hand before launch. The owner gives the number.
     scansBase: 0,
-    sinceText: "scans have run on KinBeat, for {sessions} visitors.",
+    sinceText: "scans have run on KinBeat by {sessions} people.",
   },
   leak: {
     title: "This could be your live data",
