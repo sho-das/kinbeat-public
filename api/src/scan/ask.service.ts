@@ -113,8 +113,10 @@ export function route(message: string): AskReply | null {
   // A bare domain on its own, "kinbeat.com", is a site to scan. Inside a sentence it is left to the AI.
   if (/^(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(message.trim())) return { kind: 'scan', mode: 'site', value: `https://${message.trim()}` };
   const links = message.match(LINK) ?? [];
+  // A message that is one link and nothing else is a site or repository to scan, never pasted text, whatever its path looks like.
+  const justLink = links.length === 1 && links[0] === message.trim();
   // A scrambled value (base64 or hex blob) is a chat to scan even when it is short: the rules decode it, the AI cannot.
-  if (message.length > PASTE_AT || detect(message).length > 0 || SCRAMBLED.test(message)) return { kind: 'scan', mode: 'paste', value: message };
+  if (!justLink && (message.length > PASTE_AT || detect(message).length > 0 || SCRAMBLED.test(message))) return { kind: 'scan', mode: 'paste', value: message };
   if (links.length > 1) return { kind: 'answer', text: ASK_LINES.twoLinks };
   if (links.length === 1) {
     const link = /^https?:\/\//i.test(links[0]) ? links[0] : `https://${links[0]}`;
