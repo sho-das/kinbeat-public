@@ -164,7 +164,7 @@ export function Scanner() {
       .catch(() => {});
   }, []);
   const [copied, setCopied] = useState("");
-  const askBox = useRef<HTMLInputElement>(null);
+  const askBox = useRef<HTMLTextAreaElement>(null);
   const chatLog = useRef<HTMLOListElement>(null);
   // Answers already given in this scan, by the question as typed (case and spaces aside). The same question again gets the same answer with no AI call.
   const answered = useRef(new Map<string, { text: string; action?: Pick }>());
@@ -384,6 +384,8 @@ export function Scanner() {
   async function sendQuestion() {
     const message = question.trim();
     if (!message || asking) return;
+    // The help folds away so the chat window gets the room.
+    setHelpOpen(false);
     if (awaitToken) {
       if (busy || scanWithToken(message)) return;
     }
@@ -451,8 +453,25 @@ export function Scanner() {
       }
       if (reply?.capped) setCapped(true);
       const answer = { text: reply?.text ?? NO_API, ...(reply?.action === "drive" || reply?.action === "slack" || reply?.action === "files" ? { action: reply.action as Pick } : {}) };
-      if (reply?.text && !reply.retry) answered.current.set(key, answer);
+      // The AI tags the scan the visitor means (repo, history, site). With a link in the message the page starts it;
+      // without one, the AI has asked for the link, and a history scan then waits for it. Those answers are not kept.
+      const tagged = reply?.action === "repo" || reply?.action === "history" || reply?.action === "site" ? (reply.action as "repo" | "history" | "site") : null;
+      const link = typeof reply?.link === "string" ? reply.link : "";
+      if (reply?.text && !reply.retry && !tagged) answered.current.set(key, answer);
+      if (tagged === "history" && link) {
+        setChat((c) => [...c, { who: "ai", ...answer }, { who: "ai", text: A.historyToken, ask: "token", tokenFor: "history" }]);
+        pendingRepo.current = link;
+        tokenFor.current = "history";
+        return;
+      }
       setChat((c) => [...c, { who: "ai", ...answer }]);
+      if (tagged === "history") setAwaitHistoryRepo(true);
+      if ((tagged === "repo" || tagged === "site") && link) {
+        changeMode(tagged);
+        if (tagged === "site") setSite(link);
+        else setRepo(link);
+        setAutoRun((n) => n + 1);
+      }
     } catch {
       setChat((c) => [...c, { who: "ai", text: NO_API }]);
     } finally {
@@ -743,6 +762,15 @@ export function Scanner() {
     if (!asking && chat.length > 1) askBox.current?.focus({ preventScroll: true });
   }, [chat, asking, busy, slackPick, scanAt, result]);
 
+  // The box grows with its text, up to about six lines, then scrolls inside itself.
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    const box = askBox.current;
+    if (!box) return;
+    box.style.height = "auto";
+    box.style.height = `${Math.min(box.scrollHeight, 160)}px`;
+  }, [question]);
+
   // The section heading, the line under it and the whole chat window stay on screen together on every device:
   // the chat log gets only the height that is left once those fixed parts fit, and scrolls inside itself.
   // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -756,7 +784,8 @@ export function Scanner() {
       if (!head || !box) return;
       const fixed = box.getBoundingClientRect().bottom - head.getBoundingClientRect().top - log.offsetHeight;
       const room = window.innerHeight - fixed - 24;
-      log.style.maxHeight = `${Math.max(140, Math.min(room, window.innerHeight * 0.6))}px`;
+      // At least two bubbles stay in view: the floor is 360px, or 45% of a short screen.
+      log.style.maxHeight = `${Math.max(Math.min(360, window.innerHeight * 0.45), Math.min(room, window.innerHeight * 0.6))}px`;
     };
     fit();
     const sizer = new ResizeObserver(fit);
@@ -784,6 +813,8 @@ export function Scanner() {
   }, [busy, asking, result]);
   // A public repository without a token: the groups come from the server's counts, and no fold can open.
   const countsOnly = shown?.repo?.counts;
+  // Nothing found: the token note and button would add nothing, so they stay hidden.
+  const countsTotal = countsOnly ? (countsOnly.real ?? 0) + (countsOnly.possible ?? 0) + (countsOnly.other ?? 0) : 0;
   const groups = countsOnly ? (["real", "possible", "other"] as const).filter((k) => countsOnly[k]).map((k) => [k, countsOnly[k]] as [typeof k, number]) : tally(visible);
   const openGroup = group === "none" ? null : (group ?? groups[0]?.[0] ?? null);
 
@@ -880,7 +911,7 @@ export function Scanner() {
                     </li>
                   </ul>
                 )}
-                {shown && !busy && countsOnly && (
+                {shown && !busy && countsOnly && countsTotal > 0 && (
                   <div className="note scaninfo" role="status">
                     <p>{R.countsOnlyNote}</p>
                     <p className="chat__hint">
@@ -1095,7 +1126,18 @@ export function Scanner() {
                   </div>
                 )}
               </div>
-              <input ref={askBox} type="text" value={question} maxLength={2000} placeholder={awaitToken ? A.tokenPlaceholder : capped ? A.scanPlaceholder : A.askPlaceholder} aria-label={awaitToken ? A.tokenPlaceholder : capped ? A.scanPlaceholder : A.askPlaceholder} autoComplete="off" readOnly={asking || boxOff} onChange={(e) => setQuestion(e.target.value)} />
+              <textarea
+                ref={askBox}
+                rows={1}
+                value={question} maxLength={2000} placeholder={awaitToken ? A.tokenPlaceholder : capped ? A.scanPlaceholder : A.askPlaceholder} aria-label={awaitToken ? A.tokenPlaceholder : capped ? A.scanPlaceholder : A.askPlaceholder} autoComplete="off" readOnly={asking || boxOff} onChange={(e) => setQuestion(e.target.value)}
+                // Enter sends; Shift + Enter starts a new line, so a pasted chat keeps its lines.
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendQuestion();
+                  }
+                }}
+              />
             </div>
             <button className="btn askbox__btn" type="submit" disabled={!question.trim() || asking || boxOff}>
               {asking ? (

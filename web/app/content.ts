@@ -5,7 +5,7 @@ export const content = {
   ],
   headline: ["Find your exposed tokens", "before hackers do."],
   lead: "Billions of credentials leak every year from documents, GitHub and every machine identity.",
-  cta: { primary: "Get a free scan", nav: "Contact us" },
+  cta: { primary: "Scan for Free", nav: "Contact us" },
   left: {
     modes: [
       { id: "files", label: "Upload a file" },
@@ -155,7 +155,7 @@ export const content = {
         { action: "drive", label: "Scan a Google Drive file" },
         { action: "slack", label: "Scan my Slack chats" },
       ],
-      queries: ["Scan my GitHub PR history", "What can KinBeat scan?", "What can you find in GitHub?", "What can you find in Google Drive?", "What can you find in a PDF?", "What can you find in a screenshot?"],
+      queries: ["Scan my GitHub repo", "Scan my GitHub PR history", "What can KinBeat scan?", "What can you find in GitHub?", "What can you find in Google Drive?"],
       samplesTitle: "Try a sample chat",
       samplesNote: "Copy one and paste it into the box.",
       copy: "Copy",
