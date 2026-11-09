@@ -136,6 +136,8 @@ function FragmentRow({ row, open, onToggle }: { row: ScanRow; open: ScanDetail |
               id {open.id}
               {open.chars !== undefined ? ` - ${open.chars} characters` : ""}
               {` - blocked ${open.summary.blocked}, errors ${open.summary.errors}`}
+              {open.usage ? ` - model calls ${open.usage.calls}, tokens in ${open.usage.inputTokens} (cached ${open.usage.cachedTokens}), out ${open.usage.outputTokens}` : ""}
+              {open.usage?.cost !== undefined ? `, cost $${open.usage.cost.toFixed(4)}` : ""}
             </p>
             {open.result.files && open.result.files.length > 0 && (
               <ul className="notes">

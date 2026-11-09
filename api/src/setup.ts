@@ -1,8 +1,19 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { trackUsage } from './scan/usage';
+import { finishTrace, startTrace } from './scan/trace';
 
 const JSON_LIMIT = '1mb';
 
 export function configureApp(app: NestExpressApplication) {
+  // Each request gets its own counter for the model tokens it uses.
+  app.use((_req: unknown, _res: unknown, next: () => void) => trackUsage(next));
+  // Each request also gets a trace. It is sent only if the request called the model, and it holds no text (see trace.ts).
+  app.use((req: { path?: string }, res: { once(event: string, done: () => void): void }, next: () => void) =>
+    startTrace(req.path ?? '', (trace) => {
+      res.once('close', () => void finishTrace(trace));
+      next();
+    }),
+  );
   app.useBodyParser('json', { limit: JSON_LIMIT });
   app.set('trust proxy', trustedHops());
 }

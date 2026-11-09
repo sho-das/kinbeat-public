@@ -6,6 +6,8 @@ import { Code, ReasonKey, safeForLog, sentence, verdictOf } from './reasons';
 import { ScanBudget } from './budget';
 import { Progress } from './progress';
 import { SLICE_WIDTHS, ScrubResult } from './scrubber';
+import { addUsage } from './usage';
+import { recordModelCall } from './trace';
 import { DailyCap, Gate, numberEnv } from './limits';
 
 const MAX_RETRIES = 3;
@@ -52,6 +54,7 @@ interface ModelReply {
   model?: unknown;
   output_text?: unknown;
   output?: Array<{ type?: unknown; content?: Array<{ text?: unknown } | null> } | null>;
+  usage?: unknown;
 }
 
 export function extractText(payload: ModelReply | null | undefined): string {
@@ -341,8 +344,14 @@ export class MuseClient {
   private async post(input: string | unknown[], signal?: AbortSignal, maxTokens?: number): Promise<{ status: 'ok'; text: string; model: string } | { status: 'timeout' | 'error'; error: string; model: string }> {
     assertModelAllowed(this.model);
     await this.wake(signal);
+    // One trace span per model call: its timing, status and token counts. No text goes into it.
+    const startedAt = Date.now();
+    const traced = <R extends { status: 'ok' | 'timeout' | 'error'; model: string }>(result: R, attempts: number, httpStatus?: number, usage?: unknown): R => {
+      recordModelCall(startedAt, { model: result.model, status: result.status, attempts, httpStatus, usage });
+      return result;
+    };
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      if (signal?.aborted) return { status: 'error', error: 'Cancelled', model: this.model };
+      if (signal?.aborted) return traced({ status: 'error', error: 'Cancelled', model: this.model }, attempt);
       const body = JSON.stringify({ model: this.model, input, ...(this.temperature ? { temperature: 0 } : {}), ...(maxTokens && this.maxOutput ? { max_output_tokens: maxTokens } : {}) });
       let response: Response;
       try {
@@ -357,7 +366,7 @@ export class MuseClient {
         );
       } catch (error) {
         const name = signal?.aborted ? 'Cancelled' : (error as Error).name;
-        return { status: name === 'TimeoutError' ? 'timeout' : 'error', error: `Request failed: ${name}`, model: this.model };
+        return traced({ status: name === 'TimeoutError' ? 'timeout' : 'error', error: `Request failed: ${name}`, model: this.model }, attempt + 1);
       }
       if (RETRY_STATUSES.includes(response.status) && attempt < MAX_RETRIES) {
         await sleep(this.backoffMs * 2 ** attempt);
@@ -373,18 +382,19 @@ export class MuseClient {
         attempt--;
         continue;
       }
-      if (!response.ok) return { status: 'error', error: `HTTP ${response.status}`, model: this.model };
+      if (!response.ok) return traced({ status: 'error', error: `HTTP ${response.status}`, model: this.model }, attempt + 1, response.status);
       let payload: ModelReply | null;
       try {
         payload = await response.json();
       } catch {
-        return { status: 'error', error: 'Response was not JSON', model: this.model };
+        return traced({ status: 'error', error: 'Response was not JSON', model: this.model }, attempt + 1, response.status);
       }
       const used = typeof payload?.model === 'string' && MODEL_NAME.test(payload.model) ? payload.model : this.model;
-      if (isContributorModel(used)) return { status: 'error', error: 'Answer discarded: the API used a -contributor model', model: used };
+      if (isContributorModel(used)) return traced({ status: 'error', error: 'Answer discarded: the API used a -contributor model', model: used }, attempt + 1, response.status);
       this.awakeAt = Date.now();
-      return { status: 'ok', text: extractText(payload), model: used };
+      addUsage(payload?.usage);
+      return traced({ status: 'ok', text: extractText(payload), model: used }, attempt + 1, response.status, payload?.usage);
     }
-    return { status: 'error', error: 'Retries used up', model: this.model };
+    return traced({ status: 'error', error: 'Retries used up', model: this.model }, MAX_RETRIES + 1);
   }
 }

@@ -2,6 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { SCAN_STORE, ScanRecord, ScanRow, ScanStore } from '../store/types';
 import { fixedReason, sentence } from './reasons';
+import { costOf, currentUsage } from './usage';
+import { traceNumbers } from './trace';
 
 
 interface Scanned {
@@ -22,7 +24,12 @@ export class ScanLog {
       if (v === 'real' || v === 'unsure' || v === 'example' || v === 'not_secret') verdicts[v]++;
       else verdicts.none++;
     }
+    traceNumbers({ findings: result.findings.length, verdict_real: verdicts.real, verdict_unsure: verdicts.unsure, verdict_example: verdicts.example, verdict_not_secret: verdicts.not_secret, verdict_none: verdicts.none });
     const id = randomUUID();
+    // The usage is saved with the record for the admin logs. It is not part of what the visitor gets back.
+    const used = currentUsage();
+    const cost = used ? costOf(used) : undefined;
+    const usage = used && used.calls > 0 ? { ...used, ...(cost !== undefined ? { cost } : {}) } : undefined;
     await this.store.save({
       id,
       at: new Date().toISOString(),
@@ -35,7 +42,8 @@ export class ScanLog {
       model: result.model,
       summary: result.summary,
       verdicts,
-      result,
+      ...(usage ? { usage } : {}),
+      result: usage ? { ...result, usage } : result,
     });
     return id;
   }

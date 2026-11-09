@@ -12,6 +12,8 @@ export interface ScanRow {
   model: string;
   summary: Record<string, number>;
   verdicts: { real: number; unsure: number; example: number; none: number };
+  // Model tokens this scan used, and their cost in US dollars when prices are set. Absent on scans saved before this was counted.
+  usage?: { calls: number; inputTokens: number; cachedTokens: number; outputTokens: number; cost?: number };
 }
 
 export interface ScanRecord extends ScanRow {

@@ -17,6 +17,7 @@ function toScanRow(row: any): ScanRow {
     model: row.model,
     summary: row.summary,
     verdicts: row.verdicts,
+    ...(row.usage ?? row.result?.usage ? { usage: row.usage ?? row.result.usage } : {}),
   };
 }
 
@@ -59,7 +60,7 @@ export class PgScanStore implements ScanStore {
   }
 
   async list(): Promise<ScanRow[]> {
-    const { rows } = await this.pool.query('SELECT id, at, kind, label, chars, files, duration_ms, mode, model, summary, verdicts FROM scans ORDER BY at DESC, id DESC LIMIT 200');
+    const { rows } = await this.pool.query("SELECT id, at, kind, label, chars, files, duration_ms, mode, model, summary, verdicts, result->'usage' AS usage FROM scans ORDER BY at DESC, id DESC LIMIT 200");
     return rows.map(toScanRow);
   }
 

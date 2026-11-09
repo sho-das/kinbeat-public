@@ -12,6 +12,7 @@ export interface ScanRow {
   model: string;
   summary: { findings: number; blocked: number; errors: number; unverified?: number; timeouts?: number; limited?: number; widened?: number };
   verdicts: { real: number; unsure: number; example: number; none: number };
+  usage?: { calls: number; inputTokens: number; cachedTokens: number; outputTokens: number; cost?: number };
 }
 
 export interface ScanDetail extends ScanRow {
