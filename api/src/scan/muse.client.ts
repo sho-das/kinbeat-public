@@ -2,11 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { JudgeResult, Verdict } from './types';
 import { BatchRow, CodeAnswer, EXAMPLE_WORDS, buildBatchPrompt, parseBatchCodes, quoteCheck, ruleVote, disputeHint } from './verify';
-import { Code, ReasonKey, safeForLog, sentence, verdictOf } from './reasons';
+import { Code, ReasonKey, safeForLog, sentence, spendSentence, verdictOf } from './reasons';
 import { ScanBudget } from './budget';
 import { Progress } from './progress';
 import { SLICE_WIDTHS, ScrubResult } from './scrubber';
-import { addUsage } from './usage';
+import { addUsage, monthSpend } from './usage';
 import { recordModelCall } from './trace';
 import { DailyCap, Gate, numberEnv } from './limits';
 
@@ -131,7 +131,7 @@ const OWN_SERVER = /\.modal\.direct$/;
 // Our own server gets them in the raw text; a private key's value is not sent again, since its BEGIN and END lines are shown.
 const NEVER_SEND = new Set(['private_key', 'jwt']);
 
-type BatchAnswer<T> = { status: 'ok'; value: T } | { status: 'limit'; code: 'BUDGET' | 'CAP' } | { status: 'timeout' | 'error' };
+type BatchAnswer<T> = { status: 'ok'; value: T } | { status: 'limit'; code: 'BUDGET' | 'CAP' | 'SPEND' } | { status: 'timeout' | 'error' };
 
 // Two answers agree when they are the same, or when both are hidden from the page (example and not a secret).
 const HIDDEN: Verdict[] = ['example', 'not_secret'];
@@ -181,7 +181,7 @@ export class MuseClient {
   async readImage(png: Buffer, options: { signal?: AbortSignal; owner?: string } = {}): Promise<ReadImageResult> {
     if (this.mode === 'mock') return { status: 'unavailable' };
     if (options.signal?.aborted) return { status: 'error', error: 'Cancelled' };
-    if (!this.cap.take(options.owner)) return { status: 'limit' };
+    if (monthSpend.blocked() || !this.cap.take(options.owner)) return { status: 'limit' };
     const input = [{ role: 'user', content: [{ type: 'input_text', text: READ_PROMPT }, { type: 'input_image', image_url: `data:image/png;base64,${png.toString('base64')}` }] }];
     const out = await this.post(input, options.signal);
     if (out.status !== 'ok') return { status: out.status, error: out.error };
@@ -194,7 +194,7 @@ export class MuseClient {
 
   // One Ask AI answer: the prompt goes in as it is, the model's plain text comes back. The caller checks the text.
   async ask(prompt: string, signal?: AbortSignal): Promise<{ status: 'ok'; text: string } | { status: 'unavailable' | 'timeout' | 'error' }> {
-    if (this.mode === 'mock') return { status: 'unavailable' };
+    if (this.mode === 'mock' || monthSpend.blocked()) return { status: 'unavailable' };
     // No token cap: the model thinks before it writes, and a cap on output ate the thinking and left no answer (seen 2026-11-04).
     const out = await this.post(prompt, signal);
     return out.status === 'ok' ? { status: 'ok', text: out.text } : { status: out.status };
@@ -205,7 +205,7 @@ export class MuseClient {
   // The whole text comes back at the end, exactly as ask() would give it. If the stream fails before any text arrived,
   // the plain call is made instead, so a visitor never loses an answer to a streaming problem.
   async askStream(prompt: string, on: { thinking?: (steps: number) => void; text?: (piece: string) => void }, signal?: AbortSignal): Promise<{ status: 'ok'; text: string } | { status: 'unavailable' | 'timeout' | 'error' }> {
-    if (this.mode === 'mock') return { status: 'unavailable' };
+    if (this.mode === 'mock' || monthSpend.blocked()) return { status: 'unavailable' };
     assertModelAllowed(this.model);
     await this.wake(signal);
     const startedAt = Date.now();
@@ -376,6 +376,7 @@ export class MuseClient {
       }
       const prompt = build([...sent].map(([id, row]) => ({ ...row, id })));
       if (options.budget && !options.budget.take(prompt)) return all({ status: 'limit', code: 'BUDGET' });
+      if (monthSpend.blocked()) return all({ status: 'limit', code: 'SPEND' });
       if (!this.cap.take(options.owner)) return all({ status: 'limit', code: 'CAP' });
       counter.calls++;
       const out = await this.post(prompt, options.signal);
@@ -398,7 +399,7 @@ export class MuseClient {
   }
 
   private unverified(model: string, key: ReasonKey = 'NOT_SURE'): JudgeResult {
-    return { status: 'unverified', mode: this.mode, model, verdict: 'unsure', code: key, reason: sentence(key) };
+    return { status: 'unverified', mode: this.mode, model, verdict: 'unsure', code: key, reason: key === 'SPEND' ? spendSentence(monthSpend.usage().calls) : sentence(key) };
   }
 
   // Wakes our own server once, for every scan waiting at that moment, and only when it may be asleep. Nothing keeps it awake:

@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { detect } from './detectors';
 import { AskBudget, DailyCap, numberEnv } from './limits';
 import { MuseClient } from './muse.client';
+import { monthSpend } from './usage';
+import { spendChatLine } from './reasons';
 import { parseRepoLink } from './repo/repo-rules';
 import { RateLimiter } from '../security/rate-limit';
 
@@ -189,7 +191,7 @@ export class AskService {
 
   // The page asks this on load: can KinBeat AI answer today?
   status(): { ok: boolean } {
-    return { ok: this.budget.allowed() && this.cappedDay !== Math.floor(Date.now() / 86_400_000) };
+    return { ok: !monthSpend.blocked() && this.budget.allowed() && this.cappedDay !== Math.floor(Date.now() / 86_400_000) };
   }
 
   constructor(private readonly muse: MuseClient) {}
@@ -200,6 +202,7 @@ export class AskService {
     if (!this.burst.hit(owner).allowed || !this.minute.hit(owner).allowed) return { kind: 'answer', text: ASK_LINES.slowDown };
     const routed = route(text);
     if (routed) return routed;
+    if (monthSpend.blocked()) return { kind: 'answer', text: spendChatLine(monthSpend.usage().calls), capped: true };
     if (!this.budget.allowed()) return { kind: 'answer', text: ASK_LINES.capped, capped: true };
     if (!this.cap.take(owner)) {
       // A visitor over their own share gets the fallback; only the day's total marks the day as capped.

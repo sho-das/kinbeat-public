@@ -44,6 +44,7 @@ export const OWN = Object.freeze({
   FAILED: 'The AI check failed for this one. Please check it yourself.',
   BUDGET: 'This scan is too large for the AI to check every finding. Please check this one yourself, or scan fewer files.',
   CAP: 'Your daily limit is done for today. Please try again tomorrow.',
+  SPEND: 'Oops! KinBeat AI has hit its limit for this month. Please check this one yourself.',
   OLD: 'This finding was saved before fixed reasons were added.',
 });
 
@@ -56,9 +57,21 @@ export const sentence = (key: ReasonKey): string => (Object.hasOwn(CODES, key) ?
 
 const SENTENCES = new Set<string>([...Object.values(CODES).map(([, text]) => text), ...Object.values(OWN)]);
 
+// A count of this month's AI checks, rounded down to two leading digits so it reads as a round number: 9,834 becomes "over 9,800".
+export function roughCount(calls: number): string {
+  if (!Number.isFinite(calls) || calls < 100) return `${Math.max(0, Math.floor(calls))}`;
+  const step = 10 ** (Math.floor(Math.log10(calls)) - 1);
+  return `over ${(Math.floor(calls / step) * step).toLocaleString('en-GB')}`;
+}
+
+// The month-limit sentences carry the count, so a visitor knows why the limit was reached.
+export const spendSentence = (calls: number): string => `Oops! KinBeat AI has already run ${roughCount(calls)} checks this month and hit its limit. Please check this one yourself.`;
+export const spendChatLine = (calls: number): string => `Oops! KinBeat AI has already run ${roughCount(calls)} checks this month and hit its limit. Scans still work, and the AI is back next month.`;
+const SPEND_SHAPE = /^Oops! KinBeat AI has already run (over )?[\d,]+ checks this month and hit its limit\. Please check this one yourself\.$/;
+
 // The last guard before a judge is returned or saved: a reason that is not one of our sentences becomes FAILED.
 export function fixedReason<T extends { status?: string; reason?: string; code?: string }>(judge: T): T {
-  if (judge.status === 'skipped' || (typeof judge.reason === 'string' && SENTENCES.has(judge.reason))) return judge;
+  if (judge.status === 'skipped' || (typeof judge.reason === 'string' && (SENTENCES.has(judge.reason) || SPEND_SHAPE.test(judge.reason)))) return judge;
   return { ...judge, code: 'FAILED', reason: OWN.FAILED };
 }
 

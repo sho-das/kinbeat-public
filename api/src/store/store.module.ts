@@ -1,9 +1,10 @@
 import { Global, Inject, Injectable, Logger, Module, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
-import { MemoryAuthStore, MemoryCaseStore, MemoryRepoStore, MemoryScanStore } from './memory.store';
+import { MemoryAuthStore, MemoryCaseStore, MemoryRepoStore, MemoryScanStore, MemorySpendStore } from './memory.store';
 import { migrate } from './migrate';
-import { PgAuthStore, PgCaseStore, PgRepoStore, PgScanStore } from './pg.store';
-import { AUTH_STORE, AuthStore, CASE_STORE, CaseStore, REPO_STORE, RepoStore, SCAN_STORE, ScanStore } from './types';
+import { PgAuthStore, PgCaseStore, PgRepoStore, PgScanStore, PgSpendStore } from './pg.store';
+import { AUTH_STORE, AuthStore, CASE_STORE, CaseStore, REPO_STORE, RepoStore, SCAN_STORE, ScanStore, SPEND_STORE } from './types';
+import { monthSpend, SpendStore } from '../scan/usage';
 
 const POOL = Symbol('PG_POOL');
 const RETENTION_DAYS = 30;
@@ -27,6 +28,7 @@ class StoreLifecycle implements OnModuleInit, OnApplicationShutdown {
     @Inject(SCAN_STORE) private readonly scans: ScanStore,
     @Inject(AUTH_STORE) private readonly auth: AuthStore,
     @Inject(REPO_STORE) private readonly repos: RepoStore,
+    @Inject(SPEND_STORE) private readonly spend: SpendStore,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -41,6 +43,9 @@ class StoreLifecycle implements OnModuleInit, OnApplicationShutdown {
       }
       this.logger.log(applied.length ? `migrations applied: ${applied.join(', ')}` : 'database is up to date');
     }
+    await monthSpend.attach(this.spend);
+    const cost = monthSpend.cost();
+    this.logger.log(`month spend so far: ${monthSpend.usage().calls} calls${cost !== undefined ? `, $${cost.toFixed(2)}` : ''}${monthSpend.limit() ? `, limit $${monthSpend.limit()}` : ', no limit set'}`);
     await this.purge();
     this.timer = setInterval(() => void this.purge(), PURGE_EVERY_MS);
     this.timer.unref();
@@ -76,8 +81,9 @@ class StoreLifecycle implements OnModuleInit, OnApplicationShutdown {
     { provide: CASE_STORE, inject: [POOL], useFactory: (pool: Pool | null): CaseStore => (pool ? new PgCaseStore(pool) : new MemoryCaseStore()) },
     { provide: AUTH_STORE, inject: [POOL], useFactory: (pool: Pool | null): AuthStore => (pool ? new PgAuthStore(pool) : new MemoryAuthStore()) },
     { provide: REPO_STORE, inject: [POOL], useFactory: (pool: Pool | null): RepoStore => (pool ? new PgRepoStore(pool) : new MemoryRepoStore()) },
+    { provide: SPEND_STORE, inject: [POOL], useFactory: (pool: Pool | null): SpendStore => (pool ? new PgSpendStore(pool) : new MemorySpendStore()) },
     StoreLifecycle,
   ],
-  exports: [SCAN_STORE, CASE_STORE, AUTH_STORE, REPO_STORE],
+  exports: [SCAN_STORE, CASE_STORE, AUTH_STORE, REPO_STORE, SPEND_STORE],
 })
 export class StoreModule {}

@@ -31,17 +31,99 @@ export function currentUsage(): Usage | undefined {
   return usage ? { ...usage } : undefined;
 }
 
-// Called once per model reply. A reply with no usage block still counts as a call.
-export function addUsage(raw: unknown): void {
-  const usage = scope.getStore();
-  if (!usage) return;
+// The usage block of one reply as plain counts.
+function read(raw: unknown): Usage {
   const block = (raw ?? {}) as RawUsage;
   const input = count(block.input_tokens);
-  usage.calls++;
-  usage.inputTokens += input;
-  usage.cachedTokens += Math.min(input, count(block.input_tokens_details?.cached_tokens));
-  usage.outputTokens += count(block.output_tokens);
+  return { calls: 1, inputTokens: input, cachedTokens: Math.min(input, count(block.input_tokens_details?.cached_tokens)), outputTokens: count(block.output_tokens) };
 }
+
+const addTo = (total: Usage, part: Usage) => {
+  total.calls += part.calls;
+  total.inputTokens += part.inputTokens;
+  total.cachedTokens += part.cachedTokens;
+  total.outputTokens += part.outputTokens;
+};
+
+// Called once per model reply. A reply with no usage block still counts as a call.
+export function addUsage(raw: unknown): void {
+  const part = read(raw);
+  monthSpend.add(part);
+  const usage = scope.getStore();
+  if (usage) addTo(usage, part);
+}
+
+// Where the month totals are kept between restarts. The memory store keeps them for one process only.
+export interface SpendStore {
+  getMonth(month: string): Promise<Usage | undefined>;
+  addMonth(month: string, part: Usage): Promise<void>;
+}
+
+// The calendar month in UTC, for example 2026-11.
+export const monthKey = (at = new Date()): string => at.toISOString().slice(0, 7);
+
+// This month's model usage across every request, and the guard that stops calls near the monthly limit.
+// The limit is MODEL_MONTH_LIMIT_USD; without it, or without prices, nothing is ever stopped.
+// Calls stop at STOP_AT of the limit, so the last few calls in flight cannot push the month over it.
+const STOP_AT = 0.95;
+
+export class MonthSpend {
+  private month = monthKey();
+  private total = empty();
+  private store?: SpendStore;
+
+  // Loads this month's totals from the store and keeps adding to it from now on.
+  async attach(store: SpendStore): Promise<void> {
+    this.store = store;
+    const saved = await store.getMonth(this.month);
+    if (saved) this.total = { ...saved };
+  }
+
+  add(part: Usage): void {
+    this.roll();
+    addTo(this.total, part);
+    void this.store?.addMonth(this.month, part).catch(() => undefined);
+  }
+
+  usage(): Usage {
+    this.roll();
+    return { ...this.total };
+  }
+
+  cost(): number | undefined {
+    return costOf(this.usage());
+  }
+
+  limit(): number | undefined {
+    const value = price('MODEL_MONTH_LIMIT_USD');
+    return value && value > 0 ? value : undefined;
+  }
+
+  // True when the month's cost has reached STOP_AT of the limit.
+  blocked(): boolean {
+    const limit = this.limit();
+    const cost = this.cost();
+    return limit !== undefined && cost !== undefined && cost >= limit * STOP_AT;
+  }
+
+  // A new month starts from zero.
+  private roll(): void {
+    const now = monthKey();
+    if (now !== this.month) {
+      this.month = now;
+      this.total = empty();
+    }
+  }
+
+  // For tests only: forget everything.
+  reset(): void {
+    this.month = monthKey();
+    this.total = empty();
+    this.store = undefined;
+  }
+}
+
+export const monthSpend = new MonthSpend();
 
 // Prices in US dollars per one million tokens, from the provider's price page. Unset means the cost is not known.
 function price(name: string): number | undefined {

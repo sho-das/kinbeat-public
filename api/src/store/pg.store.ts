@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { SpendStore, Usage } from '../scan/usage';
 import { randomUUID } from 'node:crypto';
 import { AdminRecord, AuditEntry, AuditRow, AuthStore, CaseRecord, CaseStore, normaliseEmail, ScanRecord, ScanRow, RepoResultRow, RepoStore, ScanStore } from './types';
 
@@ -222,6 +223,25 @@ export class PgAuthStore implements AuthStore {
     const sessions = await this.pool.query('DELETE FROM sessions WHERE expires_at <= $1', [when]);
     await this.pool.query('DELETE FROM login_attempts WHERE at < $1', [new Date(now - 24 * 3_600_000)]);
     return (tokens.rowCount ?? 0) + (sessions.rowCount ?? 0);
+  }
+}
+
+export class PgSpendStore implements SpendStore {
+  constructor(private readonly pool: Pool) {}
+
+  async getMonth(month: string): Promise<Usage | undefined> {
+    const { rows } = await this.pool.query('SELECT calls, input_tokens, cached_tokens, output_tokens FROM usage_months WHERE month = $1', [month]);
+    const row = rows[0];
+    return row ? { calls: Number(row.calls), inputTokens: Number(row.input_tokens), cachedTokens: Number(row.cached_tokens), outputTokens: Number(row.output_tokens) } : undefined;
+  }
+
+  async addMonth(month: string, part: Usage): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO usage_months (month, calls, input_tokens, cached_tokens, output_tokens) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (month) DO UPDATE SET calls = usage_months.calls + EXCLUDED.calls, input_tokens = usage_months.input_tokens + EXCLUDED.input_tokens,
+       cached_tokens = usage_months.cached_tokens + EXCLUDED.cached_tokens, output_tokens = usage_months.output_tokens + EXCLUDED.output_tokens, updated_at = now()`,
+      [month, part.calls, part.inputTokens, part.cachedTokens, part.outputTokens],
+    );
   }
 }
 

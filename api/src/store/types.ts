@@ -119,6 +119,7 @@ export interface RepoStore {
 export const SCAN_STORE = Symbol('SCAN_STORE');
 export const CASE_STORE = Symbol('CASE_STORE');
 export const REPO_STORE = Symbol('REPO_STORE');
+export const SPEND_STORE = Symbol('SPEND_STORE');
 
 // Admin emails are stored and looked up in this one form.
 export const normaliseEmail = (email: string): string => email.trim().toLowerCase();

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { SpendStore, Usage } from '../scan/usage';
 import { AdminRecord, AuditEntry, AuditRow, AuthStore, CaseRecord, CaseStore, normaliseEmail, RepoResultRow, RepoStore, ScanRecord, ScanRow, ScanStore } from './types';
 
 const MAX_SCANS = 200;
@@ -148,6 +149,20 @@ export class MemoryAuthStore implements AuthStore {
     for (const [hash, token] of this.tokens) if (token.expiresAt <= now) (this.tokens.delete(hash), removed++);
     for (const [hash, session] of this.sessions) if (session.expiresAt <= now) (this.sessions.delete(hash), removed++);
     return removed;
+  }
+}
+
+export class MemorySpendStore implements SpendStore {
+  private readonly months = new Map<string, Usage>();
+
+  async getMonth(month: string): Promise<Usage | undefined> {
+    const row = this.months.get(month);
+    return row ? { ...row } : undefined;
+  }
+
+  async addMonth(month: string, part: Usage): Promise<void> {
+    const row = this.months.get(month) ?? { calls: 0, inputTokens: 0, cachedTokens: 0, outputTokens: 0 };
+    this.months.set(month, { calls: row.calls + part.calls, inputTokens: row.inputTokens + part.inputTokens, cachedTokens: row.cachedTokens + part.cachedTokens, outputTokens: row.outputTokens + part.outputTokens });
   }
 }
 
