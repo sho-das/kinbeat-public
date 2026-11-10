@@ -9,6 +9,7 @@ import { SLICE_WIDTHS, ScrubResult } from './scrubber';
 import { addUsage, monthSpend } from './usage';
 import { recordModelCall } from './trace';
 import { DailyCap, Gate, numberEnv } from './limits';
+import { SmallModel } from './small-model';
 
 const MAX_RETRIES = 3;
 const TIMEOUT_MS = 60_000;
@@ -104,7 +105,11 @@ interface JudgeOptions {
   signal?: AbortSignal;
   // Step 1 of 2 is the two AI calls, step 2 of 2 the last round. A scan with no last round skips step 2.
   progress?: Progress;
+  // Which model judges: Muse Spark on our own server (the default), or the small model on Cloud Run, which gets masked text only.
+  provider?: Provider;
 }
+
+export type Provider = 'muse' | 'small';
 
 // At most this many findings go in one AI call (150 timed out in a live test), and this many calls of one scan run at
 // the same time. The rest wait in a queue.
@@ -155,6 +160,8 @@ export class MuseClient {
   private maxOutput = true;
   private readonly gate = new Gate(numberEnv('MUSE_MAX_CONCURRENT', 12));
   private readonly cap = new DailyCap(numberEnv('MUSE_DAILY_CALLS', 0), numberEnv('MUSE_DAILY_CALLS_PER_VISITOR', 0));
+  // The second provider. It is only used when a caller asks for it.
+  readonly small = new SmallModel();
   private awakeAt = 0;
   private waking: Promise<void> | null = null;
 
@@ -265,16 +272,18 @@ export class MuseClient {
     const results = new Map<string, JudgeResult>();
     const counter = { calls: 0, queue: new Gate(SCAN_CALLS) };
     const [narrow, wideWidth] = SLICE_WIDTHS;
+    const toSmall = options.provider === 'small';
+    const modelName = toSmall ? this.small.model : this.model;
     const done = (id: string, result: JudgeResult, width: number) => results.set(id, { ...result, width, widened: width > narrow });
-    const stop = (id: string, key: ReasonKey, width: number, model = this.model) => done(id, this.unverified(model, key), width);
+    const stop = (id: string, key: ReasonKey, width: number, model = modelName) => done(id, this.unverified(model, key), width);
     // A failed call keeps its status; the visitor sees only our sentence for it.
-    const notOk = (answer: BatchAnswer<unknown>, model = this.model): JudgeResult => ({
+    const notOk = (answer: BatchAnswer<unknown>, model = modelName): JudgeResult => ({
       ...this.unverified(model, answer.status === 'limit' ? answer.code : answer.status === 'timeout' ? 'TIMEOUT' : 'FAILED'),
       status: answer.status as JudgeResult['status'],
     });
 
-    // Our own server gets the raw text when every finding has it; any other server gets the masked slice.
-    const raw = this.sendsRaw && items.length > 0 && items.every((item) => item.raw);
+    // Our own server gets the raw text when every finding has it; any other server, and always the small model, gets the masked slice.
+    const raw = !toSmall && this.sendsRaw && items.length > 0 && items.every((item) => item.raw);
     const sliceOf = (item: BatchItem, width: number): ScrubResult => (raw ? { ok: true, slice: item.raw!(width) } : item.slice(width));
 
     type Open = { item: BatchItem; core: string; first?: JudgeResult };
@@ -285,7 +294,7 @@ export class MuseClient {
       else stop(item.id, 'LEAK_GUARD', narrow);
     }
 
-    const rows = open.map((o) => this.row(o.item, o.core, undefined, raw));
+    const rows = open.map((o) => this.row(o.item, o.core, undefined, raw, toSmall));
     if (rows.length > 0) options.progress?.('ai', 1, 2);
     const [firsts, seconds] = await Promise.all([this.batchJudge(rows, options, counter, raw), this.batchJudge(rows, options, counter, raw)]);
     // vote: the rule book sided with this answer. third: no vote.
@@ -319,7 +328,7 @@ export class MuseClient {
 
     const width = this.widen ? wideWidth : narrow;
     if (last.length > 0) options.progress?.('ai', 2, 2);
-    const again = await this.batchJudge(last.map((o) => this.row(o.item, o.wide, o.hint, raw)), options, counter, raw);
+    const again = await this.batchJudge(last.map((o) => this.row(o.item, o.wide, o.hint, raw, toSmall)), options, counter, raw);
     for (const o of last) {
       const answer = again.get(o.item.id)!;
       if (answer.status !== 'ok') done(o.item.id, notOk(answer, o.first!.model), width);
@@ -329,7 +338,8 @@ export class MuseClient {
     return { results, calls: counter.calls };
   }
 
-  private row(item: BatchItem, text: string, hint?: string, raw = false): BatchRow {
+  // The value field is only ever filled for our own server. A row for the small model never carries it, whatever the server address.
+  private row(item: BatchItem, text: string, hint: string | undefined, raw: boolean, toSmall: boolean): BatchRow {
     return {
       id: item.id,
       type: item.type,
@@ -337,7 +347,7 @@ export class MuseClient {
       ...(item.line ? { line: item.line } : {}),
       ...(item.facts ? { facts: item.facts } : {}),
       text,
-      ...(this.sendsRaw && item.value && (raw ? item.type !== 'private_key' : !NEVER_SEND.has(item.type)) ? { value: item.value } : {}),
+      ...(!toSmall && this.sendsRaw && item.value && (raw ? item.type !== 'private_key' : !NEVER_SEND.has(item.type)) ? { value: item.value } : {}),
       ...(hint ? { hint } : {}),
     };
   }
@@ -376,10 +386,11 @@ export class MuseClient {
       }
       const prompt = build([...sent].map(([id, row]) => ({ ...row, id })));
       if (options.budget && !options.budget.take(prompt)) return all({ status: 'limit', code: 'BUDGET' });
-      if (monthSpend.blocked()) return all({ status: 'limit', code: 'SPEND' });
+      // The month's spend guard is about Muse's token price; the small model has none, so it keeps answering.
+      if (options.provider !== 'small' && monthSpend.blocked()) return all({ status: 'limit', code: 'SPEND' });
       if (!this.cap.take(options.owner)) return all({ status: 'limit', code: 'CAP' });
       counter.calls++;
-      const out = await this.post(prompt, options.signal);
+      const out = await (options.provider === 'small' ? this.small.post(prompt, options.signal) : this.post(prompt, options.signal));
       if (out.status !== 'ok') return all({ status: out.status });
       // A reply that repeats a secret value is thrown away whole, and the log says only that it happened.
       if (group.some((row) => row.value && row.value.length >= 8 && out.text.includes(row.value))) {
