@@ -1,0 +1,41 @@
+# Runs on every push and pull request: both apps must type-check and build, the web tests must pass, and KinBeat's own
+# rules scan the changed files for anything that looks like a secret.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            api/package-lock.json
+            web/package-lock.json
+
+      - name: API - install
+        run: npm ci
+        working-directory: api
+      - name: API - type-check and build
+        run: npx tsc --noEmit -p tsconfig.json && npm run build
+        working-directory: api
+
+      - name: Web - install
+        run: npm ci
+        working-directory: web
+      - name: Web - type-check and tests
+        run: npx tsc --noEmit && npm test
+        working-directory: web
+
+      - name: KinBeat scans its own changes
+        run: npx ts-node --transpile-only tools/self-scan.ts ${{ github.event.pull_request.base.sha || github.event.before }} ${{ github.sha }}
+        working-directory: api
