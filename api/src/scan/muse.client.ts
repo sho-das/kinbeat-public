@@ -160,8 +160,9 @@ export class MuseClient {
   private maxOutput = true;
   private readonly gate = new Gate(numberEnv('MUSE_MAX_CONCURRENT', 12));
   private readonly cap = new DailyCap(numberEnv('MUSE_DAILY_CALLS', 0), numberEnv('MUSE_DAILY_CALLS_PER_VISITOR', 0));
-  // The second provider. It is only used when a caller asks for it.
+  // The second provider. It judges when a caller asks for it, or for every scan when JUDGE_PROVIDER=small (used by the comparison run).
   readonly small = new SmallModel();
+  readonly defaultProvider: Provider = process.env.JUDGE_PROVIDER === 'small' ? 'small' : 'muse';
   private awakeAt = 0;
   private waking: Promise<void> | null = null;
 
@@ -268,7 +269,8 @@ export class MuseClient {
   // on a wider slice, with our reason as a hint. If it gives the answer the rule book sided with, that is the answer;
   // if not, the finding shows as possible. With no rule-book vote, a third call judges without a hint and its answer decides.
   // Two answers that agree always stand, even where our rule book would decide otherwise. All of these go in one last round. A failed call leaves the finding with its failed status.
-  async judgeBatch(items: BatchItem[], options: JudgeOptions = {}): Promise<{ results: Map<string, JudgeResult>; calls: number }> {
+  async judgeBatch(items: BatchItem[], given: JudgeOptions = {}): Promise<{ results: Map<string, JudgeResult>; calls: number }> {
+    const options: JudgeOptions = { ...given, provider: given.provider ?? this.defaultProvider };
     const results = new Map<string, JudgeResult>();
     const counter = { calls: 0, queue: new Gate(SCAN_CALLS) };
     const [narrow, wideWidth] = SLICE_WIDTHS;

@@ -166,7 +166,7 @@ export class ScanService {
     const result = {
       source: { files: safeReports.length },
       mode: this.muse.mode,
-      model: this.muse.mode === 'live' ? this.muse.model : 'mock-judge',
+      model: this.muse.mode === 'live' ? this.judgeModel : 'mock-judge',
       files: safeReports,
       confidenceNote: `Findings read from pictures or scanned pages (sources image-read and pdf-read) have their confidence lowered by ${READ_CONFIDENCE_DROP}, because reading text from a picture can make mistakes and miss secrets.`,
       summary: { ...this.summarize(safeFindings), unread },
@@ -259,7 +259,7 @@ export class ScanService {
     const result = {
       source: input.templateId ? { templateId: input.templateId, unit } : { unit },
       mode: this.muse.mode,
-      model: this.muse.mode === 'live' ? this.muse.model : 'mock-judge',
+      model: this.muse.mode === 'live' ? this.judgeModel : 'mock-judge',
       summary: this.summarize(safeFindings),
       findings: safeFindings,
     };
@@ -268,6 +268,11 @@ export class ScanService {
     this.logger.log(`scan done findings=${findings.length} mode=${result.mode} model=${result.model}`);
     const scanId = await this.scanLog.record({ kind: input.templateId ? 'template' : 'text', label: input.templateId ?? 'Pasted text', chars: text.length, startedAt }, result);
     return { ...result, scanId };
+  }
+
+  // The name of the model that judges scans by default, for the scan record.
+  private get judgeModel(): string {
+    return this.muse.defaultProvider === 'small' ? this.muse.small.model : this.muse.model;
   }
 
   // Judges all findings together: each step of the AI check is one call for the whole scan (see MuseClient.judgeBatch).
