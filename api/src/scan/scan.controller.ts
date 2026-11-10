@@ -1,6 +1,7 @@
 import { ArgumentsHost, BadRequestException, Body, Catch, Delete, ExceptionFilter, Controller, ForbiddenException, Get, Headers, HttpCode, NotFoundException, Param, Post, Req, RequestTimeoutException, Res, UploadedFile, UseFilters, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Public } from '../auth/public';
+import { AskListener } from './ask.service';
 import { visitorKey } from '../security/client-ip';
 import { OneFileScanGuard, ScanRateLimitGuard, TokenScanRateLimitGuard } from '../security/rate-limit';
 import { MAX_FILE_BYTES } from './extract/extractor.service';
@@ -33,6 +34,12 @@ class OneFileFilter implements ExceptionFilter {
 
 // A GitHub token: fine-grained (github_pat_) or classic (ghp_ and the other prefixes). Checked before any call to GitHub.
 const GITHUB_TOKEN = /^(github_pat_[A-Za-z0-9_]{20,240}|gh[pousr]_[A-Za-z0-9]{20,240})$/;
+
+interface Streamable {
+  write(chunk: string): unknown;
+  end(): unknown;
+  flushHeaders?(): unknown;
+}
 
 interface ClientGone {
   writableEnded: boolean;
@@ -107,10 +114,22 @@ export class ScanController {
   // Ask AI: a link or pasted text comes back as a scan for the page to start; a question gets the AI's checked answer.
   @Post('ask')
   @HttpCode(200)
-  ask(@Body() body: { message?: unknown; summary?: AskSummary; pending?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone) {
+  async ask(@Body() body: { message?: unknown; summary?: AskSummary; pending?: unknown }, @Req() req: { ip?: string }, @Res({ passthrough: true }) res: ClientGone & Streamable, @Headers('accept') accept?: string) {
     res.setHeader('Cache-Control', 'no-store');
     const pending = body?.pending === 'history' ? 'history' : undefined;
-    return this.askService.ask(body?.message, body?.summary, visitorKey(req), AbortSignal.any([leaves(res), AbortSignal.timeout(75_000)]), pending);
+    const signal = AbortSignal.any([leaves(res), AbortSignal.timeout(75_000)]);
+    if (!/text\/event-stream/.test(accept ?? '')) return this.askService.ask(body?.message, body?.summary, visitorKey(req), signal, pending);
+    // Streamed: thinking and draft events while the model works, then one done event with the same reply as the JSON route.
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    const send = (event: string, data: unknown) => {
+      if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    const listen: AskListener = { thinking: (steps) => send('thinking', { steps }), draft: (text) => send('draft', { text }) };
+    const reply = await this.askService.ask(body?.message, body?.summary, visitorKey(req), signal, pending, listen);
+    send('done', reply);
+    res.end();
   }
 
   @Get('templates')

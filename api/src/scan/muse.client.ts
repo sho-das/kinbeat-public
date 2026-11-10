@@ -47,6 +47,34 @@ export function mockJudge(slice: string): { verdict: Verdict; code: Code; quote:
   return cue ? { verdict: 'example', code: 'EXAMPLE_WORD_NEAR', quote: cue[0] } : { verdict: 'real', code: 'NO_EXAMPLE_SIGN', quote: null };
 }
 
+// Thinking events reach the page once per this many reasoning steps of the model.
+const THINK_EVERY = 10;
+
+// Reads a server-sent-event body line by line and yields each JSON event. A line that is not JSON is skipped.
+export async function* streamEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<Record<string, unknown>> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let rest = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    rest += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const lines = rest.split('\n');
+    rest = done ? '' : (lines.pop() ?? '');
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      try {
+        const event = JSON.parse(data);
+        if (event && typeof event === 'object') yield event as Record<string, unknown>;
+      } catch {
+        // Not JSON: skipped.
+      }
+    }
+    if (done) return;
+  }
+}
+
 // A model name from the API is kept only when it looks like one, because it is saved and logged.
 const MODEL_NAME = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -170,6 +198,61 @@ export class MuseClient {
     // No token cap: the model thinks before it writes, and a cap on output ate the thinking and left no answer (seen 2026-11-04).
     const out = await this.post(prompt, signal);
     return out.status === 'ok' ? { status: 'ok', text: out.text } : { status: out.status };
+  }
+
+  // The same answer, streamed: the server sends its reply as a series of events (server-sent events). The model thinks
+  // first (thinking events, one per batch of its reasoning steps), then writes (text events, each a piece of the answer).
+  // The whole text comes back at the end, exactly as ask() would give it. If the stream fails before any text arrived,
+  // the plain call is made instead, so a visitor never loses an answer to a streaming problem.
+  async askStream(prompt: string, on: { thinking?: (steps: number) => void; text?: (piece: string) => void }, signal?: AbortSignal): Promise<{ status: 'ok'; text: string } | { status: 'unavailable' | 'timeout' | 'error' }> {
+    if (this.mode === 'mock') return { status: 'unavailable' };
+    assertModelAllowed(this.model);
+    await this.wake(signal);
+    const startedAt = Date.now();
+    let text = '';
+    let reasoning = 0;
+    try {
+      const response = await this.gate.run(
+        () =>
+          fetch(`${this.baseUrl}/responses`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+            body: JSON.stringify({ model: this.model, input: prompt, stream: true, ...(this.temperature ? { temperature: 0 } : {}) }),
+            signal: signal ? AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), signal]) : AbortSignal.timeout(TIMEOUT_MS),
+          }),
+        signal,
+      );
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+      let usage: unknown;
+      let finished = false;
+      for await (const event of streamEvents(response.body)) {
+        if (event.type === 'response.reasoning_text.delta') {
+          reasoning++;
+          if (reasoning % THINK_EVERY === 0) on.thinking?.(reasoning);
+        } else if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+          text += event.delta;
+          on.text?.(event.delta);
+        } else if (event.type === 'response.completed') {
+          usage = (event.response as { usage?: unknown } | undefined)?.usage;
+          finished = true;
+        } else if (event.type === 'response.incomplete' || event.type === 'error') {
+          throw new Error(event.type);
+        }
+      }
+      if (!finished) throw new Error('stream ended early');
+      addUsage(usage);
+      recordModelCall(startedAt, { model: this.model, status: 'ok', attempts: 1, httpStatus: response.status, usage });
+      this.awakeAt = Date.now();
+      return { status: 'ok', text };
+    } catch (error) {
+      const name = (error as Error).name;
+      const status = signal?.aborted ? 'error' : name === 'TimeoutError' ? 'timeout' : 'error';
+      recordModelCall(startedAt, { model: this.model, status, attempts: 1 });
+      // Text already shown to the visitor cannot be taken back, so a stream that broke mid-answer is not retried.
+      if (text || signal?.aborted || status === 'timeout') return { status };
+      this.logger.warn(`stream failed before any text (${(error as Error).message}); plain call instead`);
+      return this.ask(prompt, signal);
+    }
   }
 
   // Call 1 and call 2 each judge every finding on their own, at the same time: call 2 never sees call 1's answer.

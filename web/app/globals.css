@@ -481,6 +481,7 @@ body:has(.night){background:#05081A}
 .progress__steps{display:grid;margin:0;padding:0;list-style:none}
 .progress__steps li{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--rule);color:var(--muted)}
 .progress__steps li:first-child{border-top:0}
+.progress__draft{margin:12px 0 0;padding-top:12px;border-top:1px solid var(--rule);color:var(--ink);white-space:pre-wrap}
 .progress__steps li::before{content:"";flex:none;width:18px;height:18px;border-radius:50%;border:2px solid var(--line2)}
 .progress__steps li.doing{color:var(--ink)}
 .progress__steps li.doing::before{border-color:var(--orange);border-top-color:transparent;animation:spin .8s linear infinite}

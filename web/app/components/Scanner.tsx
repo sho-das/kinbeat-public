@@ -61,6 +61,41 @@ const CHIP_ICONS: Partial<Record<Mode, React.ReactNode>> = {
 };
 type SlackChat = { id: string; name: string; kind: keyof typeof L.slackGroups };
 
+// Reads a streamed answer: thinking events move the steps, draft events show the answer so far, and the done event
+// carries the reply, the same as the JSON route gives. A plain JSON reply (an older server) is read as it is.
+// What the ask route answers: a scan to start, or an answer with an optional action, link and flags.
+type AskReply = { kind?: "answer" | "scan"; mode?: "paste" | "site" | "repo"; value?: string; text?: string; action?: string; link?: string; retry?: boolean; capped?: boolean };
+
+async function readAnswer(response: Response, onStage: (stage: 0 | 1 | 2) => void, onDraft: (text: string) => void): Promise<AskReply | null> {
+  if (!/text\/event-stream/.test(response.headers.get("content-type") ?? "") || !response.body) return response.json();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let rest = "";
+  let reply: AskReply | null = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    rest += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const blocks = rest.split("\n\n");
+    rest = done ? "" : (blocks.pop() ?? "");
+    for (const block of blocks) {
+      const event = /^event: (\w+)$/m.exec(block)?.[1];
+      const data = /^data: (.*)$/m.exec(block)?.[1];
+      if (!event || !data) continue;
+      try {
+        const payload = JSON.parse(data);
+        if (event === "thinking") onStage(1);
+        else if (event === "draft" && typeof payload.text === "string") {
+          onStage(2);
+          onDraft(payload.text);
+        } else if (event === "done") reply = payload as AskReply;
+      } catch {
+        // A broken event is skipped; the done event decides the answer.
+      }
+    }
+    if (done) return reply;
+  }
+}
+
 export function Scanner() {
   // The window opens with only the box: pasted text, a link or a question. The + menu opens the other scans.
   const [mode, setMode] = useState<Mode>("paste");
@@ -148,8 +183,11 @@ export function Scanner() {
     const t = window.setInterval(() => setThinking((Date.now() - start) / 1000), 200);
     return () => window.clearInterval(t);
   }, [asking]);
-  // Most answers take a few seconds: the steps move at 1.5 and 4 seconds, and the bar slows as it nears the end.
-  const thinkAt = thinking < 1.5 ? 0 : thinking < 4 ? 1 : 2;
+  // The answer arrives as a stream: stage 1 once the model is reasoning, stage 2 once it writes, with the draft shown.
+  // Before the first event the steps move on time, at 1.5 and 4 seconds, so the panel never looks stuck.
+  const [stage, setStage] = useState<0 | 1 | 2>(0);
+  const [draft, setDraft] = useState("");
+  const thinkAt = Math.max(stage, thinking < 1.5 ? 0 : thinking < 4 ? 1 : 2);
   const thinkPercent = Math.min(95, Math.round(100 * (1 - Math.exp(-thinking / 4))));
   const [helpOpen, setHelpOpen] = useState(false);
   // True once the server says KinBeat AI is out of budget for today: the box scans only, with no AI call.
@@ -436,14 +474,16 @@ export function Scanner() {
           })),
         }
       : undefined;
+    setStage(0);
+    setDraft("");
     try {
       const response = await fetch("/api/ask", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", accept: "text/event-stream" },
         body: JSON.stringify({ message, summary, ...(awaitHistoryRepo ? { pending: "history" } : {}) }),
       });
-      const reply = response.ok ? await response.json() : null;
-      if (reply?.kind === "scan") {
+      const reply = response.ok ? await readAnswer(response, setStage, setDraft) : null;
+      if (reply?.kind === "scan" && reply.mode && typeof reply.value === "string") {
         changeMode(reply.mode);
         if (reply.mode === "paste") setText(reply.value);
         else if (reply.mode === "site") setSite(reply.value);
@@ -1072,6 +1112,7 @@ export function Scanner() {
                         </li>
                       ))}
                     </ol>
+                    {draft && <p className="progress__draft">{draft}</p>}
                   </div>
                 </li>
               )}

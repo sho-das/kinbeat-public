@@ -148,6 +148,27 @@ export function readTag(raw: string): { text: string; action?: 'repo' | 'history
 
 // pending: what the page is waiting for. 'history': KinBeat AI just asked for a repository link for a pull request history scan.
 export type AskPending = 'history';
+
+// Listens to a streamed answer. thinking: the model is still reasoning (a growing count). draft: the answer so far,
+// as far as it is safe to show. The final reply still comes from ask(), checked as always.
+export interface AskListener {
+  thinking?: (steps: number) => void;
+  draft?: (text: string) => void;
+}
+
+// A draft never shows the last HOLD_BACK characters of the text so far: a secret the model is in the middle of writing
+// cannot be seen before the secret check can judge it. Once the check finds a secret shape, drafts stop for good.
+const HOLD_BACK = 120;
+
+export function draftOf(text: string, stopped: { value: boolean }): string | undefined {
+  if (stopped.value) return undefined;
+  if (detect(text).length > 0) {
+    stopped.value = true;
+    return undefined;
+  }
+  const safe = text.slice(0, Math.max(0, text.length - HOLD_BACK)).replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*$/, '');
+  return safe.trim() ? safe : undefined;
+}
 export function buildAskPrompt(question: string, summary: AskSummary | undefined, pending?: AskPending): string {
   // < and > are escaped so neither the question nor the summary can close a <<< >>> block.
   const data = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
@@ -173,7 +194,7 @@ export class AskService {
 
   constructor(private readonly muse: MuseClient) {}
 
-  async ask(message: unknown, summary: AskSummary | undefined, owner: string, signal?: AbortSignal, pending?: AskPending): Promise<AskReply> {
+  async ask(message: unknown, summary: AskSummary | undefined, owner: string, signal?: AbortSignal, pending?: AskPending, listen?: AskListener): Promise<AskReply> {
     const text = typeof message === 'string' ? message.normalize('NFKC').replace(/[\u200b-\u200d\u2060\ufeff]/g, '').trim().slice(0, MAX_QUESTION) : '';
     if (!text) return { kind: 'answer', text: ASK_LINES.fallback };
     if (!this.burst.hit(owner).allowed || !this.minute.hit(owner).allowed) return { kind: 'answer', text: ASK_LINES.slowDown };
@@ -189,7 +210,23 @@ export class AskService {
       return { kind: 'answer', text: ASK_LINES.fallback };
     }
     const started = Date.now();
-    const out = await this.muse.ask(buildAskPrompt(text, summary, pending), signal);
+    const prompt = buildAskPrompt(text, summary, pending);
+    const stopped = { value: false };
+    let sofar = '';
+    const out = listen
+      ? await this.muse.askStream(
+          prompt,
+          {
+            thinking: listen.thinking,
+            text: (piece) => {
+              sofar += piece;
+              const draft = draftOf(sofar, stopped);
+              if (draft !== undefined) listen.draft?.(draft);
+            },
+          },
+          signal,
+        )
+      : await this.muse.ask(prompt, signal);
     this.budget.spend(Date.now() - started);
     // The off-topic marker becomes the fixed line, so the wording never drifts and no words are generated for it.
     const tagged = out.status === 'ok' ? readTag(out.text) : { text: '' };
